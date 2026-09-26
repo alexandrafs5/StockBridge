@@ -1,0 +1,50 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Producto {
+  id        String   @id @default(uuid())
+  sku       String   @unique
+  nombre    String
+  precio    Decimal  @db.Decimal(10, 2)
+  stock     Int      @default(0)
+  deleted   Boolean  @default(false)
+  updatedAt DateTime @map("updated_at")
+  deviceId  String   @map("device_id")
+
+  ventas Venta[]
+
+  @@map("productos")
+}
+
+model Venta {
+  id          String   @id @default(uuid())
+  productoId  String   @map("producto_id")
+  cantidad    Int
+  total       Decimal  @db.Decimal(10, 2)
+  fecha       DateTime @default(now())
+  updatedAt   DateTime @map("updated_at")
+  deviceId    String   @map("device_id")
+
+  producto Producto @relation(fields: [productoId], references: [id])
+
+  @@map("ventas")
+}
+
+// Registro de auditoría de operaciones ya procesadas por el servidor.
+// Se usa para garantizar idempotencia: si el cliente reenvía una operación
+// (por una conexión que se cayó a medio POST), el servidor la reconoce
+// por su id (UUID generado en el cliente) y no la vuelve a aplicar.
+model SyncLog {
+  id          String   @id // mismo UUID que trae la operación desde sync_queue del cliente
+  tabla       String
+  operacion   String
+  procesadoEn DateTime @default(now()) @map("procesado_en")
+
+  @@map("sync_log")
+}
