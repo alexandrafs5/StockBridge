@@ -67,7 +67,3 @@ StockBridge/
 - [ ] Esquema de SQLite local + tabla `sync_queue`
 - [ ] Cliente MAUI Blazor Hybrid
 - [ ] Deploy en Railway + Supabase
-
-## 👩‍💻 Autora
-
-Proyecto de Ale — Ingeniería en Software.
