@@ -228,14 +228,4 @@ flowchart TB
 - **Regla:** *Last-write-wins* basado en `updated_at`.
 - **Justificación:** para el alcance del MVP (una tienda, pocos dispositivos), es simple de implementar y de explicar, y cubre el caso principal sin necesitar CRDTs o vector clocks.
 - **Idempotencia:** cada operación en `sync_queue` lleva un UUID generado en el cliente; el API lo usa para detectar reenvíos duplicados (por ejemplo, si la conexión se cae a medio POST) y no aplicar el cambio dos veces.
-- **Limitación conocida (a mencionar si preguntan en la evaluación):** last-write-wins puede perder cambios legítimos si dos ediciones son casi simultáneas. Se documenta como decisión consciente de alcance, no como descuido.
-
----
-
-## 12. Próximos Pasos
-
-1. Validar este documento (ajustar campos del ERD, nombres, si falta algo).
-2. Crear repositorio(s) de Git (backend y cliente, o monorepo — pendiente decidir).
-3. Levantar el proyecto de API (Express + Prisma + Dockerfile) contra Supabase.
-4. Levantar el proyecto MAUI Blazor Hybrid con el esquema de SQLite y la tabla `sync_queue`.
-5. Implementar el flujo de sincronización descrito en la Sección 8.
+- **Limitación conocida:** last-write-wins puede perder cambios legítimos si dos ediciones son casi simultáneas.
