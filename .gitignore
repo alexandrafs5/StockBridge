@@ -1,0 +1,23 @@
+# Node / Backend
+backend/node_modules/
+backend/dist/
+backend/.env
+backend/*.log
+
+# Prisma
+backend/prisma/*.db
+
+# .NET / MAUI
+client/bin/
+client/obj/
+client/*.user
+*.suo
+
+# SQLite local (datos de desarrollo)
+*.sqlite
+*.db
+
+# OS / Editor
+.DS_Store
+.vscode/
+.idea/
