@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:local="clr-namespace:StockBridge.Client"
+             x:Class="StockBridge.Client.MainPage"
+             BackgroundColor="{DynamicResource PageBackgroundColor}">
+
+    <blazorWebView:BlazorWebView xmlns:blazorWebView="clr-namespace:Microsoft.AspNetCore.Components.WebView.Maui;assembly=Microsoft.AspNetCore.Components.WebView.Maui"
+                                  HostPage="wwwroot/index.html">
+        <blazorWebView:BlazorWebView.RootComponents>
+            <blazorWebView:RootComponent Selector="#app" ComponentType="{x:Type local:Components.Routes}" />
+        </blazorWebView:BlazorWebView.RootComponents>
+    </blazorWebView:BlazorWebView>
+
+</ContentPage>

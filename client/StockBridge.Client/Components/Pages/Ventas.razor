@@ -1,0 +1,91 @@
+@page "/ventas"
+@inject LocalDatabase Db
+
+<h3>Registrar venta</h3>
+
+<select @bind="_productoSeleccionadoId">
+    <option value="">-- Selecciona un producto --</option>
+    @foreach (var p in _productos)
+    {
+        <option value="@p.Id">@p.Nombre (stock: @p.Stock)</option>
+    }
+</select>
+
+<input placeholder="Cantidad" type="number" @bind="_cantidad" />
+
+<button @onclick="RegistrarVenta">Registrar venta</button>
+
+@if (!string.IsNullOrEmpty(_mensaje))
+{
+    <p>@_mensaje</p>
+}
+
+<h4>Ventas registradas</h4>
+<table>
+    <thead><tr><th>Fecha</th><th>Producto</th><th>Cantidad</th><th>Total</th></tr></thead>
+    <tbody>
+        @foreach (var v in _ventas)
+        {
+            <tr>
+                <td>@v.Fecha.ToLocalTime().ToString("g")</td>
+                <td>@ObtenerNombreProducto(v.ProductoId)</td>
+                <td>@v.Cantidad</td>
+                <td>@v.Total.ToString("C")</td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private List<Producto> _productos = new();
+    private List<Venta> _ventas = new();
+    private string _productoSeleccionadoId = string.Empty;
+    private int _cantidad = 1;
+    private string _mensaje = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await CargarDatos();
+    }
+
+    private async Task CargarDatos()
+    {
+        _productos = await Db.ObtenerProductosAsync();
+        _ventas = await Db.ObtenerVentasAsync();
+    }
+
+    private string ObtenerNombreProducto(string productoId) =>
+        _productos.FirstOrDefault(p => p.Id == productoId)?.Nombre ?? "(producto eliminado)";
+
+    private async Task RegistrarVenta()
+    {
+        var producto = _productos.FirstOrDefault(p => p.Id == _productoSeleccionadoId);
+        if (producto == null)
+        {
+            _mensaje = "Selecciona un producto.";
+            return;
+        }
+
+        if (_cantidad <= 0 || _cantidad > producto.Stock)
+        {
+            _mensaje = "Cantidad inválida o insuficiente stock.";
+            return;
+        }
+
+        var venta = new Venta
+        {
+            ProductoId = producto.Id,
+            Cantidad = _cantidad,
+            Total = producto.Precio * _cantidad
+        };
+
+        // Guarda la venta + descuenta stock, ambos encolados para sync —
+        // funciona igual con la tienda sin internet.
+        await Db.RegistrarVentaAsync(venta, producto);
+
+        _mensaje = "Venta registrada (se sincronizará cuando haya conexión).";
+        _cantidad = 1;
+
+        await CargarDatos();
+    }
+}

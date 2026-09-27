@@ -8,10 +8,14 @@ backend/*.log
 backend/prisma/*.db
 
 # .NET / MAUI
-client/bin/
-client/obj/
+**/bin/
+**/obj/
 client/*.user
 *.suo
+
+# Visual Studio
+**/.vs/
+*.csproj.user
 
 # SQLite local (datos de desarrollo)
 *.sqlite

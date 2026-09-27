@@ -1,0 +1,76 @@
+@page "/"
+@inject LocalDatabase Db
+
+<h3>Productos</h3>
+
+<table>
+    <thead>
+        <tr><th>SKU</th><th>Nombre</th><th>Precio</th><th>Stock</th><th></th></tr>
+    </thead>
+    <tbody>
+        @foreach (var p in _productos)
+        {
+            <tr>
+                <td>@p.Sku</td>
+                <td>@p.Nombre</td>
+                <td>@p.Precio.ToString("C")</td>
+                <td>@p.Stock</td>
+                <td><button @onclick="() => Eliminar(p)">Eliminar</button></td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+<h4>Nuevo producto</h4>
+<input placeholder="SKU" @bind="_nuevoSku" />
+<input placeholder="Nombre" @bind="_nuevoNombre" />
+<input placeholder="Precio" type="number" @bind="_nuevoPrecio" />
+<input placeholder="Stock" type="number" @bind="_nuevoStock" />
+<button @onclick="Agregar">Agregar (funciona offline)</button>
+
+@code {
+    private List<Producto> _productos = new();
+    private string _nuevoSku = string.Empty;
+    private string _nuevoNombre = string.Empty;
+    private decimal _nuevoPrecio;
+    private int _nuevoStock;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Cargar();
+    }
+
+    private async Task Cargar()
+    {
+        _productos = await Db.ObtenerProductosAsync();
+    }
+
+    private async Task Agregar()
+    {
+        if (string.IsNullOrWhiteSpace(_nuevoSku) || string.IsNullOrWhiteSpace(_nuevoNombre)) return;
+
+        var producto = new Producto
+        {
+            Sku = _nuevoSku,
+            Nombre = _nuevoNombre,
+            Precio = _nuevoPrecio,
+            Stock = _nuevoStock
+        };
+
+        // Esta llamada escribe en SQLite Y encola la operación de sync —
+        // funciona igual con o sin internet, la UI no se entera de la diferencia.
+        await Db.GuardarProductoAsync(producto, esNuevo: true);
+
+        _nuevoSku = _nuevoNombre = string.Empty;
+        _nuevoPrecio = 0;
+        _nuevoStock = 0;
+
+        await Cargar();
+    }
+
+    private async Task Eliminar(Producto p)
+    {
+        await Db.EliminarProductoAsync(p);
+        await Cargar();
+    }
+}

@@ -1,0 +1,39 @@
+@inherits LayoutComponentBase
+@inject SyncService SyncService
+@implements IDisposable
+
+<div class="status-bar">
+    Estado de sincronización: <strong>@_estado</strong>
+    <button @onclick="SincronizarAhora">Sincronizar ahora</button>
+</div>
+
+<nav>
+    <a href="/">Productos</a> | <a href="/ventas">Ventas</a>
+</nav>
+
+<main>
+    @Body
+</main>
+
+@code {
+    private string _estado = "Sin sincronizar";
+
+    protected override void OnInitialized()
+    {
+        SyncService.EstadoCambiado += OnEstadoCambiado;
+        _ = SyncService.SincronizarAsync(); // intenta sincronizar al abrir la app
+    }
+
+    private void OnEstadoCambiado(object? sender, string estado)
+    {
+        _estado = estado;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SincronizarAhora() => await SyncService.SincronizarAsync();
+
+    public void Dispose()
+    {
+        SyncService.EstadoCambiado -= OnEstadoCambiado;
+    }
+}
