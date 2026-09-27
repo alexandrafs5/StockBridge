@@ -57,11 +57,16 @@ public class SyncService : IDisposable
             await TraerCambiosRemotosAsync();
             EstadoCambiado?.Invoke(this, "Al día");
         }
-        catch (Exception ex)
+        catch (HttpRequestException)
         {
             // No relanzamos: un fallo de red no debe tumbar la app.
             // Las operaciones quedan como Pendiente/Fallido y se reintentan después.
-            EstadoCambiado?.Invoke(this, $"Error de sincronización: {ex.Message}");
+            EstadoCambiado?.Invoke(this, "Sin conexión con el servidor — se reintentará automáticamente");
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error de sincronización: {ex}"); // detalle técnico solo en consola de debug
+            EstadoCambiado?.Invoke(this, "No se pudo sincronizar — se reintentará automáticamente");
         }
         finally
         {
@@ -137,7 +142,15 @@ public class SyncService : IDisposable
             await _db.AplicarCambioRemotoProductoAsync(producto);
         }
 
-        // Ventas: por ahora se insertan directo si no existen (no hay edición de ventas en el MVP).
+        foreach (var ticket in respuesta.VentaTickets)
+        {
+            await _db.AplicarCambioRemotoVentaTicketAsync(ticket);
+        }
+
+        foreach (var detalle in respuesta.DetalleVentas)
+        {
+            await _db.AplicarCambioRemotoDetalleVentaAsync(detalle);
+        }
 
         Preferences.Default.Set(ClavePreferenciaUltimaSync, respuesta.ServidorTimestamp);
     }

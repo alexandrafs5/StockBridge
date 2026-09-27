@@ -1,32 +1,103 @@
 @page "/"
 @inject LocalDatabase Db
 
-<h3>Productos</h3>
+<div class="page-header">
+    <h1>Productos</h1>
+    <p>Se guardan localmente y se sincronizan automáticamente cuando hay conexión.</p>
+</div>
 
-<table>
-    <thead>
-        <tr><th>SKU</th><th>Nombre</th><th>Precio</th><th>Stock</th><th></th></tr>
-    </thead>
-    <tbody>
-        @foreach (var p in _productos)
+<div class="workspace">
+    <div class="panel">
+        <div class="panel-header">Inventario (@_productos.Count)</div>
+        @if (_productos.Count == 0)
         {
-            <tr>
-                <td>@p.Sku</td>
-                <td>@p.Nombre</td>
-                <td>@p.Precio.ToString("C")</td>
-                <td>@p.Stock</td>
-                <td><button @onclick="() => Eliminar(p)">Eliminar</button></td>
-            </tr>
+            <div class="empty-state">Todavía no hay productos. Agrega el primero desde el panel de la derecha.</div>
         }
-    </tbody>
-</table>
+        else
+        {
+            <table>
+                <thead>
+                    <tr>
+                        <th>SKU</th>
+                        <th>Nombre</th>
+                        <th class="text-right">Precio</th>
+                        <th class="text-right">Stock</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var p in _productos)
+                    {
+                        @if (_editandoId == p.Id)
+                        {
+                            <tr class="row-editando">
+                                <td class="sku">@p.Sku</td>
+                                <td>@p.Nombre</td>
+                                <td class="text-right">
+                                    <input class="mono input-inline" type="number" min="0" step="0.01" @bind="_editPrecio" />
+                                </td>
+                                <td class="text-right">
+                                    <div class="stock-edit">
+                                        <span class="badge @ClaseStock(p.Stock)">@p.Stock</span>
+                                        <span class="stock-edit-plus">+</span>
+                                        <input class="mono input-inline input-inline-sm" type="number" min="0" placeholder="0" @bind="_editStockAgregar" />
+                                    </div>
+                                </td>
+                                <td class="text-right">
+                                    <button class="btn-icon btn-icon-accent" @onclick="() => GuardarEdicion(p)">Guardar</button>
+                                    <button class="btn-icon" @onclick="CancelarEdicion">Cancelar</button>
+                                </td>
+                            </tr>
+                        }
+                        else
+                        {
+                            <tr>
+                                <td class="sku">@p.Sku</td>
+                                <td>@p.Nombre</td>
+                                <td class="money text-right">@Formato.Moneda(p.Precio)</td>
+                                <td class="text-right">
+                                    <span class="badge @ClaseStock(p.Stock)">@p.Stock</span>
+                                </td>
+                                <td class="text-right">
+                                    <button class="btn-icon btn-icon-accent" @onclick="() => IniciarEdicion(p)">Editar</button>
+                                    <button class="btn-icon" @onclick="() => Eliminar(p)">Eliminar</button>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
 
-<h4>Nuevo producto</h4>
-<input placeholder="SKU" @bind="_nuevoSku" />
-<input placeholder="Nombre" @bind="_nuevoNombre" />
-<input placeholder="Precio" type="number" @bind="_nuevoPrecio" />
-<input placeholder="Stock" type="number" @bind="_nuevoStock" />
-<button @onclick="Agregar">Agregar (funciona offline)</button>
+    <div class="panel">
+        <div class="panel-header">Agregar producto</div>
+        <div class="panel-body">
+            @if (!string.IsNullOrEmpty(_mensaje))
+            {
+                <div class="form-message @(_esError ? "error" : "")">@_mensaje</div>
+            }
+
+            <div class="field">
+                <label for="sku">SKU</label>
+                <input id="sku" class="mono" placeholder="TEST-001" @bind="_nuevoSku" />
+            </div>
+            <div class="field">
+                <label for="nombre">Nombre</label>
+                <input id="nombre" placeholder="Nombre del producto" @bind="_nuevoNombre" />
+            </div>
+            <div class="field">
+                <label for="precio">Precio</label>
+                <input id="precio" type="number" min="0" step="0.01" placeholder="0.00" @bind="_nuevoPrecio" />
+            </div>
+            <div class="field">
+                <label for="stock">Stock inicial</label>
+                <input id="stock" type="number" min="0" placeholder="0" @bind="_nuevoStock" />
+            </div>
+            <button class="btn-primary" @onclick="Agregar">Agregar producto</button>
+        </div>
+    </div>
+</div>
 
 @code {
     private List<Producto> _productos = new();
@@ -34,6 +105,40 @@
     private string _nuevoNombre = string.Empty;
     private decimal _nuevoPrecio;
     private int _nuevoStock;
+    private string _mensaje = string.Empty;
+    private bool _esError;
+
+    private string? _editandoId;
+    private decimal _editPrecio;
+    private int _editStockAgregar;
+
+    private void IniciarEdicion(Producto p)
+    {
+        _editandoId = p.Id;
+        _editPrecio = p.Precio;
+        _editStockAgregar = 0;
+    }
+
+    private void CancelarEdicion() => _editandoId = null;
+
+    private async Task GuardarEdicion(Producto p)
+    {
+        if (_editPrecio < 0 || _editStockAgregar < 0)
+        {
+            _mensaje = "El precio y el stock a agregar no pueden ser negativos.";
+            _esError = true;
+            return;
+        }
+
+        p.Precio = _editPrecio;
+        p.Stock += _editStockAgregar; // "agregar stock" es acumulativo, no reemplaza el valor actual
+
+        await Db.GuardarProductoAsync(p, esNuevo: false);
+
+        _editandoId = null;
+        _mensaje = string.Empty;
+        await Cargar();
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -45,9 +150,28 @@
         _productos = await Db.ObtenerProductosAsync();
     }
 
+    private static string ClaseStock(int stock) => stock switch
+    {
+        0 => "out",
+        < 5 => "low",
+        _ => "ok"
+    };
+
     private async Task Agregar()
     {
-        if (string.IsNullOrWhiteSpace(_nuevoSku) || string.IsNullOrWhiteSpace(_nuevoNombre)) return;
+        if (string.IsNullOrWhiteSpace(_nuevoSku) || string.IsNullOrWhiteSpace(_nuevoNombre))
+        {
+            _mensaje = "Completa el SKU y el nombre.";
+            _esError = true;
+            return;
+        }
+
+        if (_nuevoPrecio < 0 || _nuevoStock < 0)
+        {
+            _mensaje = "El precio y el stock no pueden ser negativos.";
+            _esError = true;
+            return;
+        }
 
         var producto = new Producto
         {
@@ -64,6 +188,7 @@
         _nuevoSku = _nuevoNombre = string.Empty;
         _nuevoPrecio = 0;
         _nuevoStock = 0;
+        _mensaje = string.Empty;
 
         await Cargar();
     }

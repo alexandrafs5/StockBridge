@@ -31,5 +31,6 @@ public class PullResponseDto
 {
     public DateTime ServidorTimestamp { get; set; }
     public List<Data.Models.Producto> Productos { get; set; } = new();
-    public List<Data.Models.Venta> Ventas { get; set; } = new();
+    public List<Data.Models.VentaTicket> VentaTickets { get; set; } = new();
+    public List<Data.Models.DetalleVenta> DetalleVentas { get; set; } = new();
 }

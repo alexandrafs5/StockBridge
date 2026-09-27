@@ -1,90 +1,330 @@
 @page "/ventas"
 @inject LocalDatabase Db
+@inject SyncService SyncService
+@implements IDisposable
 
-<h3>Registrar venta</h3>
+<div class="page-header">
+    <h1>Ventas</h1>
+    <p>Agrega varios productos al carrito y regístralos juntos — funciona sin conexión.</p>
+</div>
 
-<select @bind="_productoSeleccionadoId">
-    <option value="">-- Selecciona un producto --</option>
-    @foreach (var p in _productos)
-    {
-        <option value="@p.Id">@p.Nombre (stock: @p.Stock)</option>
-    }
-</select>
-
-<input placeholder="Cantidad" type="number" @bind="_cantidad" />
-
-<button @onclick="RegistrarVenta">Registrar venta</button>
-
-@if (!string.IsNullOrEmpty(_mensaje))
-{
-    <p>@_mensaje</p>
-}
-
-<h4>Ventas registradas</h4>
-<table>
-    <thead><tr><th>Fecha</th><th>Producto</th><th>Cantidad</th><th>Total</th></tr></thead>
-    <tbody>
-        @foreach (var v in _ventas)
+<div class="workspace">
+    <div class="panel">
+        <div class="panel-header">Historial (@_tickets.Count)</div>
+        @if (_tickets.Count == 0)
         {
-            <tr>
-                <td>@v.Fecha.ToLocalTime().ToString("g")</td>
-                <td>@ObtenerNombreProducto(v.ProductoId)</td>
-                <td>@v.Cantidad</td>
-                <td>@v.Total.ToString("C")</td>
-            </tr>
+            <div class="empty-state">Todavía no hay ventas registradas.</div>
         }
-    </tbody>
-</table>
+        else
+        {
+            <table>
+                <thead>
+                    <tr>
+                        <th></th>
+                        <th>Fecha</th>
+                        <th>Método</th>
+                        <th class="text-right">Productos</th>
+                        <th class="text-right">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var ticket in _tickets.OrderByDescending(t => t.Fecha))
+                    {
+                        var detalles = DetallesDeTicket(ticket.Id);
+                        var expandido = _ticketExpandido == ticket.Id;
+
+                        <tr class="ticket-row" @onclick="() => ToggleExpandir(ticket.Id)">
+                            <td class="ticket-chevron">
+                                <svg width="10" height="10" viewBox="0 0 10 10" fill="none" class="@(expandido ? "chevron-abierto" : "")">
+                                    <path d="M2 3L5 6.5L8 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                                </svg>
+                            </td>
+                            <td class="num">@ticket.Fecha.ToLocalTime().ToString("dd/MM HH:mm")</td>
+                            <td><span class="badge-metodo">@EtiquetaMetodo(ticket.MetodoPago)</span></td>
+                            <td class="num text-right">@detalles.Sum(d => d.Cantidad)</td>
+                            <td class="money text-right">@Formato.Moneda(ticket.Total)</td>
+                        </tr>
+
+                        @if (expandido)
+                        {
+                            <tr class="ticket-detalle-row">
+                                <td colspan="5">
+                                    <div class="ticket-detalle">
+                                        @foreach (var d in detalles)
+                                        {
+                                            <div class="ticket-detalle-linea">
+                                                <span>@ObtenerNombreProducto(d.ProductoId)</span>
+                                                <span class="num">@d.Cantidad × @Formato.Moneda(d.PrecioUnitario)</span>
+                                                <span class="money">@Formato.Moneda(d.Subtotal)</span>
+                                            </div>
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+
+    <div class="panel">
+        <div class="panel-header">Registrar venta</div>
+        <div class="panel-body">
+            @if (!string.IsNullOrEmpty(_mensaje))
+            {
+                <div class="form-message @(_esError ? "error" : "")">@_mensaje</div>
+            }
+
+            <div class="field">
+                <label>Producto</label>
+                <div class="dropdown">
+                    <button type="button" class="dropdown-trigger" @onclick="ToggleDropdown">
+                        <span>@TextoSeleccionado</span>
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                            <path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                    </button>
+                    @if (_dropdownAbierto)
+                    {
+                        <div class="dropdown-menu">
+                            @foreach (var p in _productos)
+                            {
+                                <button type="button" class="dropdown-item" @onclick="() => SeleccionarProducto(p.Id)" disabled="@(StockDisponible(p.Id) <= 0)">
+                                    @p.Nombre <span class="dropdown-item-meta">disponible: @StockDisponible(p.Id)</span>
+                                </button>
+                            }
+                            @if (_productos.Count == 0)
+                            {
+                                <div class="dropdown-item-empty">No hay productos todavía</div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+            <div class="field">
+                <label for="cantidad">Cantidad</label>
+                <input id="cantidad" class="mono" type="number" min="1" @bind="_cantidad" />
+            </div>
+            <button class="btn-secondary" @onclick="AgregarAlCarrito">+ Agregar al carrito</button>
+
+            @if (_carrito.Count > 0)
+            {
+                <div class="cart">
+                    @foreach (var linea in _carrito)
+                    {
+                        <div class="cart-line">
+                            <div>
+                                <div class="cart-line-nombre">@linea.NombreProducto</div>
+                                <div class="cart-line-meta">@linea.Cantidad × @Formato.Moneda(linea.PrecioUnitario)</div>
+                            </div>
+                            <div class="cart-line-right">
+                                <span class="money">@Formato.Moneda(linea.Subtotal)</span>
+                                <button type="button" class="cart-remove" @onclick="() => QuitarDelCarrito(linea)">✕</button>
+                            </div>
+                        </div>
+                    }
+                    <div class="cart-total">
+                        <span>Total</span>
+                        <span class="money">@Formato.Moneda(_carrito.Sum(l => l.Subtotal))</span>
+                    </div>
+                </div>
+
+                <div class="field">
+                    <label>Método de pago</label>
+                    <div class="dropdown">
+                        <button type="button" class="dropdown-trigger" @onclick="ToggleDropdownMetodo">
+                            <span>@EtiquetaMetodo(_metodoPago)</span>
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                                <path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                        </button>
+                        @if (_dropdownMetodoAbierto)
+                        {
+                            <div class="dropdown-menu">
+                                @foreach (var m in _metodosPago)
+                                {
+                                    <button type="button" class="dropdown-item" @onclick="() => SeleccionarMetodo(m)">
+                                        @EtiquetaMetodo(m)
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            <button class="btn-primary" @onclick="RegistrarVenta" disabled="@(_carrito.Count == 0)">
+                Registrar venta (@_carrito.Count @(_carrito.Count == 1 ? "producto" : "productos"))
+            </button>
+        </div>
+    </div>
+</div>
 
 @code {
+    private class LineaCarrito
+    {
+        public string ProductoId { get; set; } = string.Empty;
+        public string NombreProducto { get; set; } = string.Empty;
+        public int Cantidad { get; set; }
+        public decimal PrecioUnitario { get; set; }
+        public decimal Subtotal => PrecioUnitario * Cantidad;
+    }
+
     private List<Producto> _productos = new();
-    private List<Venta> _ventas = new();
+    private List<VentaTicket> _tickets = new();
+    private List<DetalleVenta> _detalles = new();
+    private List<LineaCarrito> _carrito = new();
+
     private string _productoSeleccionadoId = string.Empty;
     private int _cantidad = 1;
     private string _mensaje = string.Empty;
+    private bool _esError;
+    private bool _mensajePendienteDeSync;
+    private bool _dropdownAbierto;
+    private string? _ticketExpandido;
+
+    private static readonly string[] _metodosPago = { "efectivo", "transferencia", "tarjeta" };
+    private string _metodoPago = "efectivo";
+    private bool _dropdownMetodoAbierto;
+
+    private string TextoSeleccionado
+    {
+        get
+        {
+            var p = _productos.FirstOrDefault(p => p.Id == _productoSeleccionadoId);
+            return p == null ? "Selecciona un producto" : $"{p.Nombre} — disponible: {StockDisponible(p.Id)}";
+        }
+    }
+
+    private int StockDisponible(string productoId)
+    {
+        var producto = _productos.FirstOrDefault(p => p.Id == productoId);
+        if (producto == null) return 0;
+        var enCarrito = _carrito.Where(l => l.ProductoId == productoId).Sum(l => l.Cantidad);
+        return producto.Stock - enCarrito;
+    }
+
+    private void ToggleDropdown() => _dropdownAbierto = !_dropdownAbierto;
+
+    private void SeleccionarProducto(string id)
+    {
+        _productoSeleccionadoId = id;
+        _dropdownAbierto = false;
+    }
+
+    private void ToggleDropdownMetodo() => _dropdownMetodoAbierto = !_dropdownMetodoAbierto;
+
+    private void SeleccionarMetodo(string metodo)
+    {
+        _metodoPago = metodo;
+        _dropdownMetodoAbierto = false;
+    }
+
+    private static string EtiquetaMetodo(string metodo) => metodo switch
+    {
+        "transferencia" => "Transferencia",
+        "tarjeta" => "Tarjeta",
+        _ => "Efectivo"
+    };
+
+    private void ToggleExpandir(string ticketId) =>
+        _ticketExpandido = _ticketExpandido == ticketId ? null : ticketId;
+
+    private List<DetalleVenta> DetallesDeTicket(string ticketId) =>
+        _detalles.Where(d => d.VentaTicketId == ticketId).ToList();
 
     protected override async Task OnInitializedAsync()
     {
+        SyncService.EstadoCambiado += OnEstadoSyncCambiado;
         await CargarDatos();
+    }
+
+    private void OnEstadoSyncCambiado(object? sender, string estado)
+    {
+        if (estado == "Al día" && _mensajePendienteDeSync)
+        {
+            _mensaje = string.Empty;
+            _mensajePendienteDeSync = false;
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose()
+    {
+        SyncService.EstadoCambiado -= OnEstadoSyncCambiado;
     }
 
     private async Task CargarDatos()
     {
         _productos = await Db.ObtenerProductosAsync();
-        _ventas = await Db.ObtenerVentasAsync();
+        _tickets = await Db.ObtenerTicketsAsync();
+        _detalles = await Db.ObtenerDetallesAsync();
     }
 
     private string ObtenerNombreProducto(string productoId) =>
         _productos.FirstOrDefault(p => p.Id == productoId)?.Nombre ?? "(producto eliminado)";
 
-    private async Task RegistrarVenta()
+    private void AgregarAlCarrito()
     {
         var producto = _productos.FirstOrDefault(p => p.Id == _productoSeleccionadoId);
         if (producto == null)
         {
             _mensaje = "Selecciona un producto.";
+            _esError = true;
             return;
         }
 
-        if (_cantidad <= 0 || _cantidad > producto.Stock)
+        if (_cantidad <= 0 || _cantidad > StockDisponible(producto.Id))
         {
-            _mensaje = "Cantidad inválida o insuficiente stock.";
+            _mensaje = "Cantidad inválida o insuficiente stock disponible.";
+            _esError = true;
             return;
         }
 
-        var venta = new Venta
+        var lineaExistente = _carrito.FirstOrDefault(l => l.ProductoId == producto.Id);
+        if (lineaExistente != null)
         {
-            ProductoId = producto.Id,
-            Cantidad = _cantidad,
-            Total = producto.Precio * _cantidad
-        };
+            lineaExistente.Cantidad += _cantidad;
+        }
+        else
+        {
+            _carrito.Add(new LineaCarrito
+            {
+                ProductoId = producto.Id,
+                NombreProducto = producto.Nombre,
+                Cantidad = _cantidad,
+                PrecioUnitario = producto.Precio
+            });
+        }
 
-        // Guarda la venta + descuenta stock, ambos encolados para sync —
-        // funciona igual con la tienda sin internet.
-        await Db.RegistrarVentaAsync(venta, producto);
-
-        _mensaje = "Venta registrada (se sincronizará cuando haya conexión).";
+        _mensaje = string.Empty;
         _cantidad = 1;
+        _productoSeleccionadoId = string.Empty;
+    }
+
+    private void QuitarDelCarrito(LineaCarrito linea) => _carrito.Remove(linea);
+
+    private async Task RegistrarVenta()
+    {
+        if (_carrito.Count == 0) return;
+
+        var lineas = new List<(Producto Producto, int Cantidad)>();
+        foreach (var linea in _carrito)
+        {
+            var producto = _productos.FirstOrDefault(p => p.Id == linea.ProductoId);
+            if (producto != null) lineas.Add((producto, linea.Cantidad));
+        }
+
+        // Un solo ticket con todas las líneas del carrito — así el historial
+        // muestra "una venta" con sus productos adentro, no una fila por producto.
+        await Db.RegistrarVentaAsync(_metodoPago, lineas);
+
+        _mensaje = "Venta registrada — se sincronizará cuando haya conexión.";
+        _esError = false;
+        _mensajePendienteDeSync = true;
+        _carrito.Clear();
+        _metodoPago = "efectivo";
 
         await CargarDatos();
     }

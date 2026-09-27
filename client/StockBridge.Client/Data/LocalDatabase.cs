@@ -12,6 +12,14 @@ namespace StockBridge.Client.Data;
 /// </summary>
 public class LocalDatabase
 {
+    // El backend (Prisma/JS) espera camelCase (sku, nombre, updatedAt...).
+    // Se serializa así explícitamente aquí para no depender de cómo se
+    // re-serialice más adelante camino al API.
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     private readonly SQLiteAsyncConnection _db;
     private readonly string _deviceId;
 
@@ -20,7 +28,8 @@ public class LocalDatabase
         _deviceId = deviceId;
         _db = new SQLiteAsyncConnection(dbPath);
         _db.CreateTableAsync<Producto>().Wait();
-        _db.CreateTableAsync<Venta>().Wait();
+        _db.CreateTableAsync<VentaTicket>().Wait();
+        _db.CreateTableAsync<DetalleVenta>().Wait();
         _db.CreateTableAsync<SyncQueueItem>().Wait();
     }
 
@@ -54,20 +63,58 @@ public class LocalDatabase
 
     // ---------- Ventas ----------
 
-    public async Task RegistrarVentaAsync(Venta venta, Producto productoAfectado)
+    /// <summary>
+    /// Registra una venta completa: un ticket (encabezado) con una o varias
+    /// líneas de producto. Cada línea descuenta su stock correspondiente.
+    /// Ticket y líneas se encolan por separado para sync, pero se guardan
+    /// juntos en la misma operación local.
+    /// </summary>
+    public async Task<VentaTicket> RegistrarVentaAsync(string metodoPago, List<(Producto Producto, int Cantidad)> lineasCarrito)
     {
-        venta.UpdatedAt = DateTime.UtcNow;
-        venta.DeviceId = _deviceId;
-        await _db.InsertAsync(venta);
-        await EncolarAsync("ventas", "create", venta.Id, venta, venta.UpdatedAt);
+        var ahora = DateTime.UtcNow;
+        var total = lineasCarrito.Sum(l => l.Producto.Precio * l.Cantidad);
 
-        // La venta descuenta stock — eso también es un cambio a productos
-        // que hay que sincronizar.
-        productoAfectado.Stock -= venta.Cantidad;
-        await GuardarProductoAsync(productoAfectado, esNuevo: false);
+        var ticket = new VentaTicket
+        {
+            MetodoPago = metodoPago,
+            Total = total,
+            Fecha = ahora,
+            UpdatedAt = ahora,
+            DeviceId = _deviceId
+        };
+
+        await _db.InsertAsync(ticket);
+        await EncolarAsync("venta_tickets", "create", ticket.Id, ticket, ticket.UpdatedAt);
+
+        foreach (var (producto, cantidad) in lineasCarrito)
+        {
+            var detalle = new DetalleVenta
+            {
+                VentaTicketId = ticket.Id,
+                ProductoId = producto.Id,
+                Cantidad = cantidad,
+                PrecioUnitario = producto.Precio,
+                Subtotal = producto.Precio * cantidad,
+                UpdatedAt = ahora,
+                DeviceId = _deviceId
+            };
+
+            await _db.InsertAsync(detalle);
+            await EncolarAsync("detalle_ventas", "create", detalle.Id, detalle, detalle.UpdatedAt);
+
+            // Cada línea descuenta su propio stock — eso también es un
+            // cambio a productos que hay que sincronizar.
+            producto.Stock -= cantidad;
+            await GuardarProductoAsync(producto, esNuevo: false);
+        }
+
+        return ticket;
     }
 
-    public Task<List<Venta>> ObtenerVentasAsync() => _db.Table<Venta>().ToListAsync();
+    public Task<List<VentaTicket>> ObtenerTicketsAsync() =>
+        _db.Table<VentaTicket>().OrderByDescending(t => t.Fecha).ToListAsync();
+
+    public Task<List<DetalleVenta>> ObtenerDetallesAsync() => _db.Table<DetalleVenta>().ToListAsync();
 
     // ---------- Cola de sincronización ----------
 
@@ -77,7 +124,7 @@ public class LocalDatabase
         {
             Tabla = tabla,
             Operacion = operacion,
-            PayloadJson = JsonSerializer.Serialize(payload),
+            PayloadJson = JsonSerializer.Serialize(payload, _jsonOptions),
             UpdatedAt = updatedAt,
             DeviceId = _deviceId,
             Estado = EstadoSync.Pendiente
@@ -111,5 +158,19 @@ public class LocalDatabase
         }
         // si el local es más nuevo o igual, no se toca —
         // ya se encargará el próximo push de mandarlo al servidor.
+    }
+
+    public async Task AplicarCambioRemotoVentaTicketAsync(VentaTicket remoto)
+    {
+        var local = await _db.Table<VentaTicket>().Where(t => t.Id == remoto.Id).FirstOrDefaultAsync();
+        if (local == null) await _db.InsertAsync(remoto);
+        else if (remoto.UpdatedAt > local.UpdatedAt) await _db.UpdateAsync(remoto);
+    }
+
+    public async Task AplicarCambioRemotoDetalleVentaAsync(DetalleVenta remoto)
+    {
+        var local = await _db.Table<DetalleVenta>().Where(d => d.Id == remoto.Id).FirstOrDefaultAsync();
+        if (local == null) await _db.InsertAsync(remoto);
+        else if (remoto.UpdatedAt > local.UpdatedAt) await _db.UpdateAsync(remoto);
     }
 }

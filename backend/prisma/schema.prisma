@@ -17,23 +17,41 @@ model Producto {
   updatedAt DateTime @map("updated_at")
   deviceId  String   @map("device_id")
 
-  ventas Venta[]
+  detalles DetalleVenta[]
 
   @@map("productos")
 }
 
-model Venta {
-  id          String   @id @default(uuid())
-  productoId  String   @map("producto_id")
-  cantidad    Int
-  total       Decimal  @db.Decimal(10, 2)
-  fecha       DateTime @default(now())
-  updatedAt   DateTime @map("updated_at")
-  deviceId    String   @map("device_id")
+// Encabezado de una venta — lo que en la tienda sería "el ticket".
+// Agrupa una o varias líneas (DetalleVenta), cada una un producto distinto.
+model VentaTicket {
+  id         String   @id @default(uuid())
+  metodoPago String   @default("efectivo") @map("metodo_pago") // "efectivo" | "transferencia" | "tarjeta"
+  total      Decimal  @db.Decimal(10, 2)
+  fecha      DateTime @default(now())
+  updatedAt  DateTime @map("updated_at")
+  deviceId   String   @map("device_id")
 
-  producto Producto @relation(fields: [productoId], references: [id])
+  detalles DetalleVenta[]
 
-  @@map("ventas")
+  @@map("venta_tickets")
+}
+
+// Una línea dentro de un ticket: un producto + cantidad + su subtotal.
+model DetalleVenta {
+  id             String   @id @default(uuid())
+  ventaTicketId  String   @map("venta_ticket_id")
+  productoId     String   @map("producto_id")
+  cantidad       Int
+  precioUnitario Decimal  @db.Decimal(10, 2) @map("precio_unitario")
+  subtotal       Decimal  @db.Decimal(10, 2)
+  updatedAt      DateTime @map("updated_at")
+  deviceId       String   @map("device_id")
+
+  ventaTicket VentaTicket @relation(fields: [ventaTicketId], references: [id])
+  producto    Producto    @relation(fields: [productoId], references: [id])
+
+  @@map("detalle_ventas")
 }
 
 // Registro de auditoría de operaciones ya procesadas por el servidor.

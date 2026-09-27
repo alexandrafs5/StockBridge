@@ -2,21 +2,47 @@
 @inject SyncService SyncService
 @implements IDisposable
 
-<div class="status-bar">
-    Estado de sincronización: <strong>@_estado</strong>
-    <button @onclick="SincronizarAhora">Sincronizar ahora</button>
+<div class="app-shell">
+    <aside class="sidebar">
+        <div class="sidebar-brand">
+            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path d="M2 14 L8 7 L12 11 L18 4" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="18" cy="4" r="1.6" fill="#fff"/>
+                <circle cx="2" cy="14" r="1.6" fill="#fff"/>
+            </svg>
+            StockBridge
+        </div>
+        <nav class="sidebar-nav">
+            <NavLink href="/" Match="Microsoft.AspNetCore.Components.Routing.NavLinkMatch.All">Productos</NavLink>
+            <NavLink href="/ventas">Ventas</NavLink>
+        </nav>
+    </aside>
+
+    <div class="main-column">
+        <div class="topbar">
+            <div class="sync-status">
+                <span class="sync-dot @EstadoClase"></span>
+                @_estado
+            </div>
+            <button class="btn-sync" @onclick="SincronizarAhora">Sincronizar ahora</button>
+        </div>
+
+        <main>
+            @Body
+        </main>
+    </div>
 </div>
-
-<nav>
-    <a href="/">Productos</a> | <a href="/ventas">Ventas</a>
-</nav>
-
-<main>
-    @Body
-</main>
 
 @code {
     private string _estado = "Sin sincronizar";
+
+    private string EstadoClase => _estado switch
+    {
+        "Al día" => "ok",
+        "Sincronizando..." => "syncing",
+        var s when s.Contains("Sin conexión") || s.Contains("No se pudo sincronizar") => "error",
+        _ => ""
+    };
 
     protected override void OnInitialized()
     {

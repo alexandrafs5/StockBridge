@@ -12,7 +12,7 @@ const router = express.Router();
  *   "operaciones": [
  *     {
  *       "id": "uuid-de-la-operacion",   // generado en el cliente, usado para idempotencia
- *       "tabla": "productos" | "ventas",
+ *       "tabla": "productos" | "venta_tickets" | "detalle_ventas",
  *       "operacion": "create" | "update" | "delete",
  *       "payload": { ... },              // datos del registro
  *       "updatedAt": "2026-09-26T10:05:00Z",
@@ -58,15 +58,17 @@ router.get('/pull', async (req, res) => {
     ...(deviceId ? { deviceId: { not: deviceId } } : {}),
   };
 
-  const [productos, ventas] = await Promise.all([
+  const [productos, ventaTickets, detalleVentas] = await Promise.all([
     prisma.producto.findMany({ where: whereBase }),
-    prisma.venta.findMany({ where: whereBase }),
+    prisma.ventaTicket.findMany({ where: whereBase }),
+    prisma.detalleVenta.findMany({ where: whereBase }),
   ]);
 
   res.json({
     servidorTimestamp: new Date().toISOString(),
     productos,
-    ventas,
+    ventaTickets,
+    detalleVentas,
   });
 });
 
@@ -81,7 +83,7 @@ async function procesarOperacion(op) {
     return 'duplicado-ignorado';
   }
 
-  const modelo = op.tabla === 'productos' ? prisma.producto : prisma.venta;
+  const modelo = obtenerModelo(op.tabla);
   const existente = await modelo.findUnique({ where: { id: op.payload.id } });
 
   if (existente && new Date(existente.updatedAt) >= new Date(op.updatedAt)) {
@@ -113,6 +115,19 @@ async function registrarComoProcesada(op) {
   await prisma.syncLog.create({
     data: { id: op.id, tabla: op.tabla, operacion: op.operacion },
   });
+}
+
+function obtenerModelo(tabla) {
+  switch (tabla) {
+    case 'productos':
+      return prisma.producto;
+    case 'venta_tickets':
+      return prisma.ventaTicket;
+    case 'detalle_ventas':
+      return prisma.detalleVenta;
+    default:
+      throw new Error(`Tabla desconocida: ${tabla}`);
+  }
 }
 
 module.exports = router;

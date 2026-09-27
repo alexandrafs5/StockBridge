@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="StockBridge.Client.csproj">
+    <Deploy />
+  </Project>
+</Solution>
