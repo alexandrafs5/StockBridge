@@ -15,6 +15,20 @@
 		<ApplicationVersion>1</ApplicationVersion>
 
 		<SupportedOSPlatformVersion Condition="'$(TargetFramework)'=='net10.0-android'">24.0</SupportedOSPlatformVersion>
+
+		<GenerateAppInstallerFile>False</GenerateAppInstallerFile>
+
+		<AppxPackageSigningEnabled>False</AppxPackageSigningEnabled>
+
+		<AppxPackageSigningTimestampDigestAlgorithm>SHA256</AppxPackageSigningTimestampDigestAlgorithm>
+
+		<AppxAutoIncrementPackageRevision>True</AppxAutoIncrementPackageRevision>
+
+		<AppxSymbolPackageEnabled>False</AppxSymbolPackageEnabled>
+
+		<GenerateTestArtifacts>False</GenerateTestArtifacts>
+
+		<HoursBetweenUpdateChecks>0</HoursBetweenUpdateChecks>
 	</PropertyGroup>
 
 	<ItemGroup>

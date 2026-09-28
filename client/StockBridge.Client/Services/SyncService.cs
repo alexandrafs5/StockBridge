@@ -152,6 +152,11 @@ public class SyncService : IDisposable
             await _db.AplicarCambioRemotoDetalleVentaAsync(detalle);
         }
 
+        foreach (var usuario in respuesta.Usuarios)
+        {
+            await _db.AplicarCambioRemotoUsuarioAsync(usuario);
+        }
+
         Preferences.Default.Set(ClavePreferenciaUltimaSync, respuesta.ServidorTimestamp);
     }
 

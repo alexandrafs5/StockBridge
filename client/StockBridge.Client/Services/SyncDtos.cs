@@ -33,4 +33,5 @@ public class PullResponseDto
     public List<Data.Models.Producto> Productos { get; set; } = new();
     public List<Data.Models.VentaTicket> VentaTickets { get; set; } = new();
     public List<Data.Models.DetalleVenta> DetalleVentas { get; set; } = new();
+    public List<Data.Models.Usuario> Usuarios { get; set; } = new();
 }

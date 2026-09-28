@@ -691,3 +691,141 @@ tbody tr:hover {
         grid-template-columns: 1fr;
     }
 }
+
+/* ---------- Layout de un solo panel (roles sin panel de alta) ---------- */
+
+.workspace-single {
+    grid-template-columns: 1fr;
+}
+
+/* ---------- Badges de rol ---------- */
+
+.role-badge {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+
+.role-badge.role-cajero { background: var(--accent-soft); color: var(--accent-ink); }
+.role-badge.role-gerente { background: var(--warning-soft); color: var(--warning); }
+.role-badge.role-dueno { background: var(--success-soft); color: var(--success); }
+
+/* ---------- Usuario actual en el sidebar ---------- */
+
+.sidebar-user {
+    margin-top: auto;
+    padding: 14px 8px 0 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+}
+
+.sidebar-user-nombre {
+    color: #fff;
+    font-size: 13.5px;
+    font-weight: 600;
+}
+
+.btn-logout {
+    margin-top: 6px;
+    font-family: var(--font-ui);
+    font-size: 12px;
+    color: var(--sidebar-ink);
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: var(--radius);
+    padding: 5px 10px;
+    cursor: pointer;
+    transition: background 0.12s ease, color 0.12s ease;
+}
+
+.btn-logout:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+/* ---------- Pantalla de login ---------- */
+
+.login-screen {
+    width: 100%;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--sidebar-bg);
+    padding: 24px;
+}
+
+.login-card {
+    width: 100%;
+    max-width: 360px;
+    background: var(--surface);
+    border-radius: 10px;
+    padding: 28px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+}
+
+.login-brand {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-bottom: 14px;
+}
+
+.login-card h2 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 6px 0;
+}
+
+.login-hint {
+    color: var(--ink-muted);
+    font-size: 13px;
+    margin: 0 0 16px 0;
+}
+
+.login-users {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+.login-user {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: var(--font-ui);
+    font-size: 14px;
+    padding: 11px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    cursor: pointer;
+    color: var(--ink);
+    transition: border-color 0.12s ease, background 0.12s ease;
+}
+
+.login-user:hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.btn-link {
+    display: block;
+    margin: 14px auto 0 auto;
+    background: none;
+    border: none;
+    color: var(--ink-muted);
+    font-family: var(--font-ui);
+    font-size: 12.5px;
+    cursor: pointer;
+}
+
+.btn-link:hover {
+    color: var(--accent);
+}

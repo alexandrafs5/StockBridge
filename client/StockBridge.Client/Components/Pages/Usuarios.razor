@@ -1,0 +1,152 @@
+@page "/usuarios"
+@inject LocalDatabase Db
+@inject SessionService Session
+
+<div class="page-header">
+    <h1>Usuarios</h1>
+    <p>Da de alta a los empleados de la tienda y asígnales un rol.</p>
+</div>
+
+@if (!Session.PuedeGestionarUsuarios)
+{
+    <div class="form-message error">No tienes permiso para ver esta sección.</div>
+}
+else
+{
+    <div class="workspace">
+        <div class="panel">
+            <div class="panel-header">Empleados (@_usuarios.Count)</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Nombre</th>
+                        <th>Rol</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var u in _usuarios)
+                    {
+                        <tr>
+                            <td>@u.Nombre</td>
+                            <td><span class="role-badge role-@u.Rol">@EtiquetaRol(u.Rol)</span></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">Nuevo empleado</div>
+            <div class="panel-body">
+                @if (!string.IsNullOrEmpty(_mensaje))
+                {
+                    <div class="form-message @(_esError ? "error" : "")">@_mensaje</div>
+                }
+
+                <div class="field">
+                    <label for="nombre">Nombre</label>
+                    <input id="nombre" @bind="_nombre" />
+                </div>
+
+                <div class="field">
+                    <label>Rol</label>
+                    <div class="dropdown">
+                        <button type="button" class="dropdown-trigger" @onclick="ToggleDropdownRol">
+                            <span>@EtiquetaRol(_rol)</span>
+                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                                <path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                        </button>
+                        @if (_dropdownRolAbierto)
+                        {
+                            <div class="dropdown-menu">
+                                @foreach (var r in _roles)
+                                {
+                                    <button type="button" class="dropdown-item" @onclick="() => SeleccionarRol(r)">
+                                        @EtiquetaRol(r)
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <div class="field">
+                    <label for="pin">PIN (4 dígitos)</label>
+                    <input id="pin" class="mono" type="password" maxlength="4" inputmode="numeric" @bind="_pin" />
+                </div>
+
+                <button class="btn-primary" @onclick="Crear">Crear empleado</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly string[] _roles = { Roles.Cajero, Roles.Gerente, Roles.Dueno };
+
+    private List<Usuario> _usuarios = new();
+    private string _nombre = string.Empty;
+    private string _pin = string.Empty;
+    private string _rol = Roles.Cajero;
+    private bool _dropdownRolAbierto;
+    private string _mensaje = string.Empty;
+    private bool _esError;
+
+    private static string EtiquetaRol(string rol) => rol switch
+    {
+        Roles.Dueno => "Dueño",
+        Roles.Gerente => "Gerente",
+        _ => "Cajero"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Session.PuedeGestionarUsuarios)
+            _usuarios = await Db.ObtenerUsuariosAsync();
+    }
+
+    private void ToggleDropdownRol() => _dropdownRolAbierto = !_dropdownRolAbierto;
+
+    private void SeleccionarRol(string rol)
+    {
+        _rol = rol;
+        _dropdownRolAbierto = false;
+    }
+
+    private async Task Crear()
+    {
+        // Segunda capa de seguridad: aunque la UI ya oculta esto, la acción
+        // también se rechaza aquí si el usuario actual no es dueño.
+        if (!Session.PuedeGestionarUsuarios)
+        {
+            _mensaje = "No tienes permiso para crear usuarios.";
+            _esError = true;
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_nombre))
+        {
+            _mensaje = "Escribe un nombre.";
+            _esError = true;
+            return;
+        }
+
+        if (_pin.Length != 4 || !_pin.All(char.IsDigit))
+        {
+            _mensaje = "El PIN debe ser de exactamente 4 dígitos.";
+            _esError = true;
+            return;
+        }
+
+        await Db.CrearUsuarioAsync(_nombre, _pin, _rol);
+
+        _mensaje = $"Empleado \"{_nombre.Trim()}\" creado.";
+        _esError = false;
+        _nombre = string.Empty;
+        _pin = string.Empty;
+        _rol = Roles.Cajero;
+
+        _usuarios = await Db.ObtenerUsuariosAsync();
+    }
+}

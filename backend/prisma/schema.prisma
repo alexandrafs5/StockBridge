@@ -55,6 +55,19 @@ model DetalleVenta {
   @@map("detalle_ventas")
 }
 
+// Empleado de la tienda con acceso a la app. El PIN se guarda ya hasheado
+// (el hash se calcula en el cliente — el servidor nunca ve el PIN en claro).
+model Usuario {
+  id        String   @id @default(uuid())
+  nombre    String
+  pinHash   String   @map("pin_hash")
+  rol       String   // "cajero" | "gerente" | "dueno"
+  updatedAt DateTime @map("updated_at")
+  deviceId  String   @map("device_id")
+
+  @@map("usuarios")
+}
+
 // Registro de auditoría de operaciones ya procesadas por el servidor.
 // Se usa para garantizar idempotencia: si el cliente reenvía una operación
 // (por una conexión que se cayó a medio POST), el servidor la reconoce

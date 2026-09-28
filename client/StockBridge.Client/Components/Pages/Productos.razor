@@ -1,17 +1,30 @@
 @page "/"
 @inject LocalDatabase Db
+@inject SessionService Session
 
 <div class="page-header">
     <h1>Productos</h1>
     <p>Se guardan localmente y se sincronizan automáticamente cuando hay conexión.</p>
 </div>
 
-<div class="workspace">
+<div class="workspace @(Session.PuedeGestionarProductos ? "" : "workspace-single")">
     <div class="panel">
         <div class="panel-header">Inventario (@_productos.Count)</div>
+
+        @if (!string.IsNullOrEmpty(_mensaje) && !Session.PuedeGestionarProductos)
+        {
+            <div class="panel-body" style="padding-bottom:0">
+                <div class="form-message @(_esError ? "error" : "")">@_mensaje</div>
+            </div>
+        }
+
         @if (_productos.Count == 0)
         {
-            <div class="empty-state">Todavía no hay productos. Agrega el primero desde el panel de la derecha.</div>
+            <div class="empty-state">
+                @(Session.PuedeGestionarProductos
+                    ? "Todavía no hay productos. Agrega el primero desde el panel de la derecha."
+                    : "Todavía no hay productos. Pídele al dueño que los agregue.")
+            </div>
         }
         else
         {
@@ -22,7 +35,10 @@
                         <th>Nombre</th>
                         <th class="text-right">Precio</th>
                         <th class="text-right">Stock</th>
-                        <th></th>
+                        @if (Session.PuedeAgregarStock)
+                        {
+                            <th></th>
+                        }
                     </tr>
                 </thead>
                 <tbody>
@@ -34,7 +50,14 @@
                                 <td class="sku">@p.Sku</td>
                                 <td>@p.Nombre</td>
                                 <td class="text-right">
-                                    <input class="mono input-inline" type="number" min="0" step="0.01" @bind="_editPrecio" />
+                                    @if (Session.PuedeGestionarProductos)
+                                    {
+                                        <input class="mono input-inline" type="number" min="0" step="0.01" @bind="_editPrecio" />
+                                    }
+                                    else
+                                    {
+                                        <span class="money">@Formato.Moneda(p.Precio)</span>
+                                    }
                                 </td>
                                 <td class="text-right">
                                     <div class="stock-edit">
@@ -58,10 +81,18 @@
                                 <td class="text-right">
                                     <span class="badge @ClaseStock(p.Stock)">@p.Stock</span>
                                 </td>
-                                <td class="text-right">
-                                    <button class="btn-icon btn-icon-accent" @onclick="() => IniciarEdicion(p)">Editar</button>
-                                    <button class="btn-icon" @onclick="() => Eliminar(p)">Eliminar</button>
-                                </td>
+                                @if (Session.PuedeAgregarStock)
+                                {
+                                    <td class="text-right">
+                                        <button class="btn-icon btn-icon-accent" @onclick="() => IniciarEdicion(p)">
+                                            @(Session.PuedeGestionarProductos ? "Editar" : "+ Stock")
+                                        </button>
+                                        @if (Session.PuedeGestionarProductos)
+                                        {
+                                            <button class="btn-icon" @onclick="() => Eliminar(p)">Eliminar</button>
+                                        }
+                                    </td>
+                                }
                             </tr>
                         }
                     }
@@ -70,33 +101,36 @@
         }
     </div>
 
-    <div class="panel">
-        <div class="panel-header">Agregar producto</div>
-        <div class="panel-body">
-            @if (!string.IsNullOrEmpty(_mensaje))
-            {
-                <div class="form-message @(_esError ? "error" : "")">@_mensaje</div>
-            }
+    @if (Session.PuedeGestionarProductos)
+    {
+        <div class="panel">
+            <div class="panel-header">Agregar producto</div>
+            <div class="panel-body">
+                @if (!string.IsNullOrEmpty(_mensaje))
+                {
+                    <div class="form-message @(_esError ? "error" : "")">@_mensaje</div>
+                }
 
-            <div class="field">
-                <label for="sku">SKU</label>
-                <input id="sku" class="mono" placeholder="TEST-001" @bind="_nuevoSku" />
+                <div class="field">
+                    <label for="sku">SKU</label>
+                    <input id="sku" class="mono" placeholder="TEST-001" @bind="_nuevoSku" />
+                </div>
+                <div class="field">
+                    <label for="nombre">Nombre</label>
+                    <input id="nombre" placeholder="Nombre del producto" @bind="_nuevoNombre" />
+                </div>
+                <div class="field">
+                    <label for="precio">Precio</label>
+                    <input id="precio" type="number" min="0" step="0.01" placeholder="0.00" @bind="_nuevoPrecio" />
+                </div>
+                <div class="field">
+                    <label for="stock">Stock inicial</label>
+                    <input id="stock" type="number" min="0" placeholder="0" @bind="_nuevoStock" />
+                </div>
+                <button class="btn-primary" @onclick="Agregar">Agregar producto</button>
             </div>
-            <div class="field">
-                <label for="nombre">Nombre</label>
-                <input id="nombre" placeholder="Nombre del producto" @bind="_nuevoNombre" />
-            </div>
-            <div class="field">
-                <label for="precio">Precio</label>
-                <input id="precio" type="number" min="0" step="0.01" placeholder="0.00" @bind="_nuevoPrecio" />
-            </div>
-            <div class="field">
-                <label for="stock">Stock inicial</label>
-                <input id="stock" type="number" min="0" placeholder="0" @bind="_nuevoStock" />
-            </div>
-            <button class="btn-primary" @onclick="Agregar">Agregar producto</button>
         </div>
-    </div>
+    }
 </div>
 
 @code {
@@ -111,34 +145,6 @@
     private string? _editandoId;
     private decimal _editPrecio;
     private int _editStockAgregar;
-
-    private void IniciarEdicion(Producto p)
-    {
-        _editandoId = p.Id;
-        _editPrecio = p.Precio;
-        _editStockAgregar = 0;
-    }
-
-    private void CancelarEdicion() => _editandoId = null;
-
-    private async Task GuardarEdicion(Producto p)
-    {
-        if (_editPrecio < 0 || _editStockAgregar < 0)
-        {
-            _mensaje = "El precio y el stock a agregar no pueden ser negativos.";
-            _esError = true;
-            return;
-        }
-
-        p.Precio = _editPrecio;
-        p.Stock += _editStockAgregar; // "agregar stock" es acumulativo, no reemplaza el valor actual
-
-        await Db.GuardarProductoAsync(p, esNuevo: false);
-
-        _editandoId = null;
-        _mensaje = string.Empty;
-        await Cargar();
-    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -157,8 +163,58 @@
         _ => "ok"
     };
 
+    private void IniciarEdicion(Producto p)
+    {
+        if (!Session.PuedeAgregarStock) return;
+
+        _editandoId = p.Id;
+        _editPrecio = p.Precio;
+        _editStockAgregar = 0;
+    }
+
+    private void CancelarEdicion() => _editandoId = null;
+
+    private async Task GuardarEdicion(Producto p)
+    {
+        // Segunda capa de seguridad: aunque la UI ya oculta estos controles
+        // según el rol, la acción también se valida aquí antes de guardar.
+        if (!Session.PuedeAgregarStock)
+        {
+            _mensaje = "No tienes permiso para modificar productos.";
+            _esError = true;
+            return;
+        }
+
+        if (_editPrecio < 0 || _editStockAgregar < 0)
+        {
+            _mensaje = "El precio y el stock a agregar no pueden ser negativos.";
+            _esError = true;
+            return;
+        }
+
+        // Solo el dueño puede cambiar el precio. Un gerente únicamente suma stock,
+        // así que su precio queda tal cual aunque el valor en pantalla se manipulara.
+        if (Session.PuedeGestionarProductos)
+            p.Precio = _editPrecio;
+
+        p.Stock += _editStockAgregar; // "agregar stock" es acumulativo, no reemplaza el valor actual
+
+        await Db.GuardarProductoAsync(p, esNuevo: false);
+
+        _editandoId = null;
+        _mensaje = string.Empty;
+        await Cargar();
+    }
+
     private async Task Agregar()
     {
+        if (!Session.PuedeGestionarProductos)
+        {
+            _mensaje = "Solo el dueño puede agregar productos nuevos.";
+            _esError = true;
+            return;
+        }
+
         if (string.IsNullOrWhiteSpace(_nuevoSku) || string.IsNullOrWhiteSpace(_nuevoNombre))
         {
             _mensaje = "Completa el SKU y el nombre.";
@@ -195,6 +251,13 @@
 
     private async Task Eliminar(Producto p)
     {
+        if (!Session.PuedeGestionarProductos)
+        {
+            _mensaje = "Solo el dueño puede eliminar productos.";
+            _esError = true;
+            return;
+        }
+
         await Db.EliminarProductoAsync(p);
         await Cargar();
     }

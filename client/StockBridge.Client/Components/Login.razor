@@ -1,0 +1,160 @@
+@inject LocalDatabase Db
+@inject SessionService Session
+
+<div class="login-screen">
+    <div class="login-card">
+        <div class="login-brand">StockBridge</div>
+
+        @if (_cargando)
+        {
+            <p class="login-hint">Cargando...</p>
+        }
+        else if (!_hayUsuarios)
+        {
+            <h2>Configuración inicial</h2>
+            <p class="login-hint">Crea la cuenta del dueño. Desde ahí podrás dar de alta a los demás empleados.</p>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="form-message error">@_error</div>
+            }
+
+            <div class="field">
+                <label for="setup-nombre">Nombre</label>
+                <input id="setup-nombre" @bind="_nombre" />
+            </div>
+            <div class="field">
+                <label for="setup-pin">PIN (4 dígitos)</label>
+                <input id="setup-pin" class="mono" type="password" maxlength="4" inputmode="numeric" @bind="_pin" />
+            </div>
+            <div class="field">
+                <label for="setup-pin2">Confirmar PIN</label>
+                <input id="setup-pin2" class="mono" type="password" maxlength="4" inputmode="numeric" @bind="_pinConfirmar" />
+            </div>
+            <button class="btn-primary" @onclick="CrearDuenoInicial">Crear cuenta de dueño</button>
+        }
+        else if (_usuarioElegido == null)
+        {
+            <h2>¿Quién eres?</h2>
+            <div class="login-users">
+                @foreach (var u in _usuarios)
+                {
+                    <button class="login-user" @onclick="() => Elegir(u)">
+                        <span>@u.Nombre</span>
+                        <span class="role-badge role-@u.Rol">@EtiquetaRol(u.Rol)</span>
+                    </button>
+                }
+            </div>
+        }
+        else
+        {
+            <h2>Hola, @_usuarioElegido.Nombre</h2>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="form-message error">@_error</div>
+            }
+
+            <div class="field">
+                <label for="login-pin">PIN</label>
+                <input id="login-pin" class="mono" type="password" maxlength="4" inputmode="numeric"
+                       @bind="_pin" @onkeydown="OnPinKeyDown" />
+            </div>
+            <button class="btn-primary" @onclick="Entrar">Entrar</button>
+            <button class="btn-link" @onclick="Volver">← Cambiar de usuario</button>
+        }
+    </div>
+</div>
+
+@code {
+    private bool _cargando = true;
+    private bool _hayUsuarios;
+    private List<Usuario> _usuarios = new();
+    private Usuario? _usuarioElegido;
+
+    private string _nombre = string.Empty;
+    private string _pin = string.Empty;
+    private string _pinConfirmar = string.Empty;
+    private string _error = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Recargar();
+    }
+
+    private async Task Recargar()
+    {
+        _hayUsuarios = await Db.ExisteAlgunUsuarioAsync();
+        _usuarios = await Db.ObtenerUsuariosAsync();
+        _cargando = false;
+    }
+
+    private static string EtiquetaRol(string rol) => rol switch
+    {
+        Roles.Dueno => "Dueño",
+        Roles.Gerente => "Gerente",
+        _ => "Cajero"
+    };
+
+    private static bool PinValido(string pin) =>
+        pin.Length == 4 && pin.All(char.IsDigit);
+
+    private async Task CrearDuenoInicial()
+    {
+        if (string.IsNullOrWhiteSpace(_nombre))
+        {
+            _error = "Escribe un nombre.";
+            return;
+        }
+        if (!PinValido(_pin))
+        {
+            _error = "El PIN debe ser de exactamente 4 dígitos.";
+            return;
+        }
+        if (_pin != _pinConfirmar)
+        {
+            _error = "Los PINs no coinciden.";
+            return;
+        }
+
+        var dueno = await Db.CrearUsuarioAsync(_nombre, _pin, Roles.Dueno);
+        _error = string.Empty;
+        Session.IniciarSesion(dueno);
+    }
+
+    private void Elegir(Usuario u)
+    {
+        _usuarioElegido = u;
+        _pin = string.Empty;
+        _error = string.Empty;
+    }
+
+    private void Volver()
+    {
+        _usuarioElegido = null;
+        _pin = string.Empty;
+        _error = string.Empty;
+    }
+
+    private async Task OnPinKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await Entrar();
+    }
+
+    private async Task Entrar()
+    {
+        if (_usuarioElegido == null) return;
+
+        var usuario = await Db.VerificarLoginAsync(_usuarioElegido.Id, _pin);
+        if (usuario == null)
+        {
+            _error = "PIN incorrecto.";
+            _pin = string.Empty;
+            return;
+        }
+
+        _error = string.Empty;
+        _pin = string.Empty;
+        Session.IniciarSesion(usuario);
+    }
+}

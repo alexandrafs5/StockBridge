@@ -1,6 +1,7 @@
 using System.Text.Json;
 using SQLite;
 using StockBridge.Client.Data.Models;
+using StockBridge.Client.Utils;
 
 namespace StockBridge.Client.Data;
 
@@ -30,6 +31,7 @@ public class LocalDatabase
         _db.CreateTableAsync<Producto>().Wait();
         _db.CreateTableAsync<VentaTicket>().Wait();
         _db.CreateTableAsync<DetalleVenta>().Wait();
+        _db.CreateTableAsync<Usuario>().Wait();
         _db.CreateTableAsync<SyncQueueItem>().Wait();
     }
 
@@ -170,6 +172,45 @@ public class LocalDatabase
     public async Task AplicarCambioRemotoDetalleVentaAsync(DetalleVenta remoto)
     {
         var local = await _db.Table<DetalleVenta>().Where(d => d.Id == remoto.Id).FirstOrDefaultAsync();
+        if (local == null) await _db.InsertAsync(remoto);
+        else if (remoto.UpdatedAt > local.UpdatedAt) await _db.UpdateAsync(remoto);
+    }
+
+    // ---------- Usuarios ----------
+
+    public async Task<bool> ExisteAlgunUsuarioAsync() =>
+        await _db.Table<Usuario>().CountAsync() > 0;
+
+    public Task<List<Usuario>> ObtenerUsuariosAsync() =>
+        _db.Table<Usuario>().OrderBy(u => u.Nombre).ToListAsync();
+
+    public async Task<Usuario> CrearUsuarioAsync(string nombre, string pin, string rol)
+    {
+        var usuario = new Usuario
+        {
+            Nombre = nombre.Trim(),
+            PinHash = Seguridad.HashPin(pin),
+            Rol = rol,
+            UpdatedAt = DateTime.UtcNow,
+            DeviceId = _deviceId
+        };
+
+        await _db.InsertAsync(usuario);
+        await EncolarAsync("usuarios", "create", usuario.Id, usuario, usuario.UpdatedAt);
+        return usuario;
+    }
+
+    /// <summary>Devuelve el usuario si el PIN coincide, o null si no.</summary>
+    public async Task<Usuario?> VerificarLoginAsync(string usuarioId, string pin)
+    {
+        var usuario = await _db.Table<Usuario>().Where(u => u.Id == usuarioId).FirstOrDefaultAsync();
+        if (usuario == null) return null;
+        return usuario.PinHash == Seguridad.HashPin(pin) ? usuario : null;
+    }
+
+    public async Task AplicarCambioRemotoUsuarioAsync(Usuario remoto)
+    {
+        var local = await _db.Table<Usuario>().Where(u => u.Id == remoto.Id).FirstOrDefaultAsync();
         if (local == null) await _db.InsertAsync(remoto);
         else if (remoto.UpdatedAt > local.UpdatedAt) await _db.UpdateAsync(remoto);
     }

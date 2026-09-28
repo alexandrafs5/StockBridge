@@ -58,10 +58,11 @@ router.get('/pull', async (req, res) => {
     ...(deviceId ? { deviceId: { not: deviceId } } : {}),
   };
 
-  const [productos, ventaTickets, detalleVentas] = await Promise.all([
+  const [productos, ventaTickets, detalleVentas, usuarios] = await Promise.all([
     prisma.producto.findMany({ where: whereBase }),
     prisma.ventaTicket.findMany({ where: whereBase }),
     prisma.detalleVenta.findMany({ where: whereBase }),
+    prisma.usuario.findMany({ where: whereBase }),
   ]);
 
   res.json({
@@ -69,6 +70,7 @@ router.get('/pull', async (req, res) => {
     productos,
     ventaTickets,
     detalleVentas,
+    usuarios,
   });
 });
 
@@ -125,6 +127,8 @@ function obtenerModelo(tabla) {
       return prisma.ventaTicket;
     case 'detalle_ventas':
       return prisma.detalleVenta;
+    case 'usuarios':
+      return prisma.usuario;
     default:
       throw new Error(`Tabla desconocida: ${tabla}`);
   }

@@ -30,6 +30,7 @@ public static class MauiProgram
         var dbPath = Path.Combine(FileSystem.AppDataDirectory, "stockbridge.db3");
 
         builder.Services.AddSingleton(sp => new LocalDatabase(dbPath, deviceId));
+        builder.Services.AddSingleton<SessionService>();
         builder.Services.AddSingleton(sp => new HttpClient());
         builder.Services.AddSingleton(sp => new ApiSyncClient(
             sp.GetRequiredService<HttpClient>(), AppConfig.ApiBaseUrl, AppConfig.ApiToken));
@@ -38,6 +39,7 @@ public static class MauiProgram
 
 #if DEBUG
         builder.Services.AddBlazorWebViewDeveloperTools();
+        builder.Logging.AddDebug();
 #endif
 
         return builder.Build();
