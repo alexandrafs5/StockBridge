@@ -18,7 +18,8 @@ public class SyncService : IDisposable
     private readonly LocalDatabase _db;
     private readonly ApiSyncClient _api;
     private readonly string _deviceId;
-    private bool _sincronizando;
+    private readonly object _lock = new();
+    private Task<bool>? _syncEnCurso;
 
     public event EventHandler<string>? EstadoCambiado; // para que la UI muestre "Sincronizando...", "Al día", etc.
 
@@ -42,13 +43,33 @@ public class SyncService : IDisposable
     /// <summary>
     /// Punto de entrada manual (útil para un botón "Sincronizar ahora" en la UI,
     /// además del disparo automático por conectividad).
+    /// Devuelve true si la sincronización se completó, false si no hubo conexión
+    /// o falló. Si ya hay una sincronización en curso, quien llame espera esa
+    /// misma en vez de lanzar otra.
     /// </summary>
-    public async Task SincronizarAsync()
+    public Task<bool> SincronizarAsync()
     {
-        if (_sincronizando) return; // evita sync duplicada si se dispara dos veces seguidas
-        if (Connectivity.Current.NetworkAccess != NetworkAccess.Internet) return;
+        lock (_lock)
+        {
+            if (_syncEnCurso != null) return _syncEnCurso;
 
-        _sincronizando = true;
+            var tarea = EjecutarSincronizacionAsync();
+            if (tarea.IsCompleted) return tarea; // terminó al instante (p. ej. sin internet)
+
+            _syncEnCurso = tarea;
+            tarea.ContinueWith(_ =>
+            {
+                lock (_lock) { _syncEnCurso = null; }
+            }, TaskScheduler.Default);
+
+            return tarea;
+        }
+    }
+
+    private async Task<bool> EjecutarSincronizacionAsync()
+    {
+        if (Connectivity.Current.NetworkAccess != NetworkAccess.Internet) return false;
+
         EstadoCambiado?.Invoke(this, "Sincronizando...");
 
         try
@@ -56,21 +77,20 @@ public class SyncService : IDisposable
             await EmpujarPendientesAsync();
             await TraerCambiosRemotosAsync();
             EstadoCambiado?.Invoke(this, "Al día");
+            return true;
         }
         catch (HttpRequestException)
         {
             // No relanzamos: un fallo de red no debe tumbar la app.
             // Las operaciones quedan como Pendiente/Fallido y se reintentan después.
             EstadoCambiado?.Invoke(this, "Sin conexión con el servidor — se reintentará automáticamente");
+            return false;
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"Error de sincronización: {ex}"); // detalle técnico solo en consola de debug
             EstadoCambiado?.Invoke(this, "No se pudo sincronizar — se reintentará automáticamente");
-        }
-        finally
-        {
-            _sincronizando = false;
+            return false;
         }
     }
 

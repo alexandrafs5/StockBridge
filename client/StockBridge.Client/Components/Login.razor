@@ -1,5 +1,7 @@
 @inject LocalDatabase Db
 @inject SessionService Session
+@inject SyncService SyncService
+@implements IDisposable
 
 <div class="login-screen">
     <div class="login-card">
@@ -7,7 +9,19 @@
 
         @if (_cargando)
         {
-            <p class="login-hint">Cargando...</p>
+            <p class="login-hint">Buscando usuarios de la tienda...</p>
+        }
+        else if (!_hayUsuarios && _sinVerificar)
+        {
+            <h2>Sin conexión</h2>
+            <p class="login-hint">
+                Todavía no hay usuarios en este equipo y no pudimos consultar el servidor
+                para ver si ya existen en la nube.
+            </p>
+            <button class="btn-primary" @onclick="Reintentar">Reintentar</button>
+            <button class="btn-link" @onclick="ConfigurarSinConexion">
+                Es la primera computadora de la tienda: configurar sin conexión
+            </button>
         }
         else if (!_hayUsuarios)
         {
@@ -69,6 +83,7 @@
 @code {
     private bool _cargando = true;
     private bool _hayUsuarios;
+    private bool _sinVerificar; // no hay usuarios locales y no se pudo consultar la nube
     private List<Usuario> _usuarios = new();
     private Usuario? _usuarioElegido;
 
@@ -79,15 +94,53 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await Recargar();
+        SyncService.EstadoCambiado += OnEstadoSync;
+        await Cargar();
     }
 
-    private async Task Recargar()
+    /// <summary>
+    /// Si ya hay usuarios locales, se muestran de inmediato. Si no hay ninguno,
+    /// se sincroniza ANTES de decidir: puede que en la nube ya exista el dueño
+    /// (equipo nuevo en una tienda que ya usa StockBridge), y en ese caso no
+    /// hay que ofrecer crear otro.
+    /// </summary>
+    private async Task Cargar()
     {
+        _cargando = true;
         _hayUsuarios = await Db.ExisteAlgunUsuarioAsync();
+        _sinVerificar = false;
+
+        if (!_hayUsuarios)
+        {
+            var sincronizo = await SyncService.SincronizarAsync();
+            _hayUsuarios = await Db.ExisteAlgunUsuarioAsync();
+            _sinVerificar = !_hayUsuarios && !sincronizo;
+        }
+
         _usuarios = await Db.ObtenerUsuariosAsync();
         _cargando = false;
     }
+
+    // Si una sincronización termina mientras se ve el login (por ejemplo, volvió
+    // el internet), se refresca la lista de usuarios sin perder lo que se esté haciendo.
+    private void OnEstadoSync(object? sender, string estado)
+    {
+        if (estado != "Al día") return;
+
+        InvokeAsync(async () =>
+        {
+            if (_cargando || _usuarioElegido != null) return;
+
+            _hayUsuarios = await Db.ExisteAlgunUsuarioAsync();
+            _usuarios = await Db.ObtenerUsuariosAsync();
+            if (_hayUsuarios) _sinVerificar = false;
+            StateHasChanged();
+        });
+    }
+
+    private async Task Reintentar() => await Cargar();
+
+    private void ConfigurarSinConexion() => _sinVerificar = false;
 
     private static string EtiquetaRol(string rol) => rol switch
     {
@@ -156,5 +209,10 @@
         _error = string.Empty;
         _pin = string.Empty;
         Session.IniciarSesion(usuario);
+    }
+
+    public void Dispose()
+    {
+        SyncService.EstadoCambiado -= OnEstadoSync;
     }
 }
