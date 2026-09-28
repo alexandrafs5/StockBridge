@@ -1,34 +1,43 @@
 # Sistema de Gestión de Inventario y Ventas Fuera de Línea
-### Documento de Especificación de Arquitectura
+### Documento de Especificación de Arquitectura — v2
 
 ---
 
 ## 1. Introducción y Objetivo
 
-Sistema híbrido escritorio + nube para tiendas locales que necesitan seguir operando (registrar ventas, consultar/ajustar inventario) aunque no tengan conexión a internet. Cuando la conexión regresa, los cambios locales se sincronizan automáticamente con una base de datos central en la nube.
+Sistema híbrido escritorio + nube para tiendas locales que necesitan seguir operando (registrar ventas, consultar y ajustar inventario, identificar a sus empleados) aunque no tengan conexión a internet. Cuando la conexión regresa, los cambios locales se sincronizan automáticamente con una base de datos central en la nube.
 
 El objetivo técnico del proyecto es demostrar:
 - Sincronización de datos entre un cliente offline-first y un backend central.
 - Manejo de estado local persistente y resiliente a fallos de red.
 - Arquitectura básica de un sistema distribuido con resolución de conflictos.
+- Control de acceso por roles que funciona también sin conexión.
 
 ---
 
-## 2. Alcance (MVP)
+## 2. Alcance
 
-**Incluido:**
+**Incluido (v1):**
 - CRUD de productos (alta, edición de precio, adición de stock, baja lógica).
-- Registro de ventas con **varios productos por venta** (carrito), agrupados en un ticket.
+- Registro de ventas con varios productos por venta (carrito), agrupados en un ticket.
 - Método de pago por venta (efectivo, transferencia, tarjeta).
-- Funcionamiento 100% offline para todas las operaciones anteriores.
-- Sincronización automática al detectar conexión.
-- Resolución de conflictos por *last-write-wins*.
+- Funcionamiento 100% offline para todo lo anterior.
+- Sincronización automática al detectar conexión, con resolución de conflictos por *last-write-wins*.
+- Backend desplegado en la nube.
+
+**Incluido (v2):**
+- Usuarios con tres roles: cajero, gerente y dueño.
+- Login por PIN en cada apertura de la app, con opción de cerrar sesión.
+- Alta de empleados por parte del dueño.
+- Usuarios sincronizados entre dispositivos.
 
 **Fuera de alcance (por ahora):**
-- Multi-tienda / multi-sucursal con roles y permisos.
+- Multi-tienda / multi-sucursal.
 - Reportes avanzados o dashboards analíticos.
-- Autenticación de usuarios robusta (se usa un token simple).
+- Autenticación de la API por usuario (se usa un token compartido).
 - Edición o cancelación de ventas ya registradas.
+- Edición o baja de usuarios.
+- Registro de qué empleado realizó cada venta.
 
 ---
 
@@ -43,20 +52,29 @@ El objetivo técnico del proyecto es demostrar:
 | RF-05 | Al confirmar una venta, el stock de cada producto involucrado se descuenta localmente. |
 | RF-06 | El sistema detecta automáticamente cuándo hay conexión disponible. |
 | RF-07 | El sistema sincroniza automáticamente las operaciones pendientes al recuperar conexión. |
-| RF-08 | El sistema resuelve conflictos de escritura concurrente (mismo registro editado en dos dispositivos) sin intervención manual. |
+| RF-08 | El sistema resuelve conflictos de escritura concurrente sin intervención manual. |
 | RF-09 | El sistema no duplica operaciones si una sincronización se reintenta tras una falla parcial (idempotencia). |
-| RF-10 | El historial de ventas se muestra agrupado por venta (ticket), con el detalle de productos disponible al expandir. |
+| RF-10 | El historial de ventas se muestra agrupado por ticket, con el detalle de productos al expandir. |
+| RF-11 | Para usar la app, el empleado se identifica eligiendo su usuario e ingresando un PIN de 4 dígitos, en cada apertura. |
+| RF-12 | El usuario puede cerrar sesión sin cerrar la app (cambio de turno). |
+| RF-13 | Cada usuario tiene un rol (cajero, gerente o dueño) que determina qué acciones puede realizar (ver sección 8). |
+| RF-14 | El dueño puede dar de alta empleados asignándoles nombre, rol y PIN. |
+| RF-15 | En una instalación nueva sin usuarios, el primer usuario creado se convierte automáticamente en dueño. |
+| RF-16 | Los usuarios se sincronizan entre dispositivos: un empleado dado de alta en un equipo puede iniciar sesión en otro. |
+| RF-17 | En un equipo sin usuarios locales, el sistema intenta sincronizar antes de ofrecer la configuración inicial, para no crear un segundo dueño si ya existe uno en la nube. |
 
 ## 4. Requisitos No Funcionales
 
 | ID | Requisito |
 |----|-----------|
-| RNF-01 | La app debe responder de forma local (sin esperar red) para toda operación de negocio. |
-| RNF-02 | La cola de sincronización debe sobrevivir a un cierre inesperado de la app (persistida en disco, no en memoria). |
+| RNF-01 | La app debe responder de forma local (sin esperar red) para toda operación de negocio, incluido el login. |
+| RNF-02 | La cola de sincronización debe sobrevivir a un cierre inesperado de la app (persistida en disco). |
 | RNF-03 | El sistema debe reintentar sincronizaciones fallidas sin perder datos. |
 | RNF-04 | El backend debe ser desplegable de forma reproducible (Docker). |
-| RNF-05 | Los errores de sincronización deben mostrarse en lenguaje claro para el usuario final, no como excepciones técnicas. |
+| RNF-05 | Los errores de sincronización se muestran en lenguaje claro para el usuario final, no como excepciones técnicas. |
 | RNF-06 | No se permiten valores negativos en precio ni en stock. |
+| RNF-07 | El PIN nunca se almacena ni se sincroniza en claro; solo su hash. |
+| RNF-08 | Los permisos por rol se validan en dos capas: la interfaz oculta lo no permitido y cada acción vuelve a validar el rol antes de ejecutarse. |
 
 ---
 
@@ -64,13 +82,13 @@ El objetivo técnico del proyecto es demostrar:
 
 | Capa | Tecnología | Motivo |
 |------|-----------|--------|
-| Cliente escritorio | .NET MAUI Blazor Hybrid (.NET 10) | Un solo lenguaje (C#) de punta a punta, sin necesidad de un bridge nativo↔JS. |
-| Almacenamiento local | SQLite (`sqlite-net-pcl`) | Estándar para persistencia local embebida, transaccional. |
-| Backend / API | Node.js + Express | Rápido de levantar, suficiente para el alcance del reto. |
-| ORM backend | Prisma | Migraciones versionadas + types automáticos. |
-| Base de datos en la nube | PostgreSQL (hosteado en Supabase) | Administrado, gratuito para este alcance, connection pooling incluido. |
-| Contenerización | Docker | Despliegue reproducible del API. |
-| Hosting del API | Railway | Deploy directo desde Dockerfile + repo de GitHub, URL pública gratis. |
+| Cliente escritorio | .NET MAUI Blazor Hybrid (.NET 10) | Un solo lenguaje (C#) de punta a punta, sin puente nativo↔JS. |
+| Almacenamiento local | SQLite (`sqlite-net-pcl`) | Persistencia local embebida y transaccional. |
+| Backend / API | Node.js + Express | Rápido de levantar, suficiente para el alcance. |
+| ORM backend | Prisma | Migraciones versionadas y tipos automáticos. |
+| Base de datos en la nube | PostgreSQL en Supabase (Session pooler) | Administrado; el Session pooler funciona por IPv4 y soporta migraciones. |
+| Contenerización | Docker (`node:20-alpine`) | Despliegue reproducible; incluye OpenSSL para el motor de Prisma. |
+| Hosting del API | Railway | Deploy desde el Dockerfile y el repositorio de GitHub. |
 
 ---
 
@@ -79,8 +97,8 @@ El objetivo técnico del proyecto es demostrar:
 ```mermaid
 flowchart LR
     subgraph Cliente["Laptop / Equipo de la tienda"]
-        UI["MAUI Blazor Hybrid\n(UI + lógica de negocio)"]
-        DB[("SQLite local\nproductos, venta_tickets,\ndetalle_ventas, sync_queue")]
+        UI["MAUI Blazor Hybrid\n(UI, sesión y permisos)"]
+        DB[("SQLite local\nproductos, venta_tickets,\ndetalle_ventas, usuarios,\nsync_queue")]
         UI <--> DB
     end
 
@@ -99,7 +117,7 @@ flowchart LR
 
 ## 7. Modelo de Datos (ERD)
 
-Una venta se modela como un **ticket** (encabezado) con una o varias **líneas de detalle**, una por producto — el mismo patrón que un recibo de compra real.
+Una venta se modela como un **ticket** (encabezado) con una o varias **líneas de detalle**, una por producto, igual que un recibo real. Los usuarios se guardan en su propia tabla.
 
 ```mermaid
 erDiagram
@@ -134,6 +152,14 @@ erDiagram
         datetime updated_at
         string device_id
     }
+    USUARIOS {
+        uuid id PK
+        string nombre
+        string pin_hash
+        string rol
+        datetime updated_at
+        string device_id
+    }
     SYNC_QUEUE {
         uuid id PK
         string tabla
@@ -146,15 +172,63 @@ erDiagram
 ```
 
 **Notas de diseño:**
-- `device_id` en cada registro de negocio identifica qué dispositivo hizo el último cambio — necesario para resolver conflictos.
+- `device_id` en cada registro identifica qué dispositivo hizo el último cambio.
 - `updated_at` es el criterio de *last-write-wins*.
-- `deleted` en productos como borrado lógico en vez de `DELETE` físico, para que el borrado también se pueda sincronizar.
-- `sync_queue.id` se genera como UUID en el cliente y viaja como identificador de idempotencia al backend — tanto para productos como para tickets y líneas de detalle.
-- `metodo_pago` vive en el ticket (aplica a toda la venta), no en cada línea — una venta tiene un solo método de pago.
+- `deleted` en productos es un borrado lógico, para que el borrado también se pueda sincronizar.
+- `sync_queue.id` se genera como UUID en el cliente y viaja como identificador de idempotencia al backend, para todas las tablas.
+- `metodo_pago` vive en el ticket porque una venta tiene un solo método de pago.
+- `usuarios.rol` toma los valores `cajero`, `gerente` o `dueno`.
+- `usuarios.pin_hash` es el hash SHA-256 del PIN, calculado en el cliente. El servidor lo almacena como cualquier otro campo y nunca ve el PIN.
+- Tablas sincronizadas: `productos`, `venta_tickets`, `detalle_ventas` y `usuarios`.
 
 ---
 
-## 8. Flujo de Sincronización (Diagrama de Secuencia)
+## 8. Usuarios, Roles y Permisos
+
+### 8.1 Matriz de permisos
+
+| Acción | Cajero | Gerente | Dueño |
+|--------|:------:|:-------:|:-----:|
+| Registrar ventas | ✅ | ✅ | ✅ |
+| Ver inventario | ✅ | ✅ | ✅ |
+| Agregar stock a un producto existente | — | ✅ | ✅ |
+| Crear productos nuevos | — | — | ✅ |
+| Editar precio de productos | — | — | ✅ |
+| Eliminar productos | — | — | ✅ |
+| Dar de alta empleados | — | — | ✅ |
+
+La jerarquía es cajero ⊂ gerente ⊂ dueño: cada rol conserva todo lo del anterior. Por eso se implementa como un único campo de rol y no como permisos sueltos.
+
+### 8.2 Aplicación de los permisos (dos capas)
+
+1. **Interfaz:** `SessionService` concentra las reglas (`PuedeVender`, `PuedeAgregarStock`, `PuedeGestionarProductos`, `PuedeGestionarUsuarios`) y las páginas ocultan los controles que no corresponden al rol. Por ejemplo, un cajero ve el inventario en solo lectura y un gerente ve "+ Stock" pero no "Editar" ni "Eliminar".
+2. **Lógica:** cada acción sensible (agregar producto, editar, eliminar, crear usuario) vuelve a consultar `SessionService` antes de guardar. Si un gerente logra disparar una edición de precio, el precio se ignora y solo se aplica la suma de stock.
+
+### 8.3 Flujo de acceso al abrir la app
+
+```mermaid
+flowchart TD
+    A["La app abre"] --> B{"¿Hay usuarios\nen SQLite local?"}
+    B -->|Sí| F["Mostrar lista de usuarios"]
+    B -->|No| C["Sincronizar con la nube"]
+    C --> D{"¿Ahora hay\nusuarios?"}
+    D -->|Sí| F
+    D -->|"No (sync correcta)"| E["Configuración inicial:\ncrear dueño"]
+    D -->|"No (sin conexión)"| G["Pantalla Sin conexión"]
+    G -->|Reintentar| C
+    G -->|"Configurar sin conexión"| E
+    F --> H["Elegir usuario e ingresar PIN"]
+    H --> I{"¿PIN correcto?"}
+    I -->|No| H
+    I -->|Sí| J["Sesión iniciada con el rol del usuario"]
+    E --> J
+```
+
+El paso de sincronizar antes de ofrecer el setup evita crear un segundo dueño en un equipo nuevo de una tienda que ya usa el sistema. Cuando no hay conexión y no se puede saber, la decisión queda explícita para la persona: reintentar, o configurar sin conexión asumiendo que es la primera computadora de la tienda.
+
+---
+
+## 9. Flujo de Sincronización (Diagrama de Secuencia)
 
 **Caso normal — offline a online:**
 
@@ -168,18 +242,20 @@ sequenceDiagram
     participant PG as Supabase
 
     U->>App: Confirma venta (carrito con 1+ productos)
-    App->>DB: INSERT venta_ticket + INSERT detalle_venta (por línea) + sync_queue por cada uno
+    App->>DB: INSERT venta_ticket + detalle_venta por línea + sync_queue por cada uno
     App-->>U: Confirmación inmediata (local)
 
-    Note over App,Net: Sin conexión — las operaciones esperan en la cola
+    Note over App,Net: Sin conexión: las operaciones esperan en la cola
 
     Net-->>App: ConnectivityChanged (conexión disponible)
     App->>DB: SELECT * FROM sync_queue WHERE estado='pendiente'
-    App->>API: POST /sync/push (batch: ticket + líneas + productos afectados)
-    API->>PG: Aplica cambios (INSERT/UPDATE por updated_at)
+    App->>API: POST /sync/push (ticket, líneas y productos afectados)
+    API->>PG: Aplica cambios (upsert por updated_at)
     PG-->>API: OK
     API-->>App: 200 OK (IDs confirmados)
     App->>DB: UPDATE sync_queue SET estado='confirmado'
+    App->>API: GET /sync/pull (cambios de otros dispositivos)
+    API-->>App: productos, tickets, detalles y usuarios nuevos
 ```
 
 **Caso de conflicto — mismo producto editado en dos dispositivos:**
@@ -195,19 +271,19 @@ sequenceDiagram
 
     D1->>API: POST /sync/push (producto X, updated_at=10:05)
     API->>PG: Compara updated_at recibido vs. el almacenado
-    PG-->>API: 10:05 es más reciente → aplica cambio
+    PG-->>API: 10:05 es más reciente, se aplica
     API-->>D1: 200 OK
 
     D2->>API: POST /sync/push (producto X, updated_at=10:02)
     API->>PG: Compara updated_at recibido (10:02) vs. almacenado (10:05)
-    PG-->>API: El almacenado es más reciente → se descarta el cambio de D2
-    API-->>D2: 200 OK (conflicto resuelto, gana el más reciente)
+    PG-->>API: El almacenado es más reciente, se descarta el cambio de D2
+    API-->>D2: 200 OK (conflicto resuelto)
     Note over D2: D2 recibe el estado actualizado en su próximo GET /sync/pull
 ```
 
 ---
 
-## 9. Ciclo de Vida de una Operación de Sincronización (Diagrama de Estados)
+## 10. Ciclo de Vida de una Operación de Sincronización (Diagrama de Estados)
 
 ```mermaid
 stateDiagram-v2
@@ -215,18 +291,18 @@ stateDiagram-v2
     Pendiente --> Enviando: Conexión disponible, se envía al API
     Enviando --> Confirmado: API responde 200 OK
     Enviando --> Fallido: Error de red / API no responde
-    Fallido --> Enviando: Reintento (backoff)
+    Fallido --> Enviando: Reintento
     Confirmado --> [*]
 ```
 
 ---
 
-## 10. Diagrama de Despliegue
+## 11. Diagrama de Despliegue
 
 ```mermaid
 flowchart TB
     subgraph Local["Equipo de la tienda"]
-        A["App MAUI\n(ejecutable instalado)"]
+        A["App MAUI\n(ejecutable)"]
         S[("SQLite\narchivo local")]
         A --- S
     end
@@ -240,43 +316,60 @@ flowchart TB
     end
 
     A -- HTTPS --> B
-    B -- Connection Pooler --> C
+    B -- "Session pooler" --> C
 ```
 
+**Notas de despliegue:**
+- Railway construye la imagen desde `backend/` (Root Directory) a partir del `Dockerfile`, y redespliega con cada push a `main`.
+- La imagen usa `node:20-alpine`, que no trae OpenSSL: el `Dockerfile` lo instala y el `schema.prisma` declara el `binaryTarget` `linux-musl-openssl-3.0.x` para el motor de Prisma.
+- Variables de entorno en Railway: `DATABASE_URL` (Session pooler de Supabase) y `API_TOKEN`.
+- Las migraciones de Prisma se ejecutan desde el equipo de desarrollo contra la misma base de Supabase que usa Railway.
+
 ---
 
-## 11. Estrategia de Resolución de Conflictos
+## 12. Estrategia de Resolución de Conflictos
 
 - **Regla:** *Last-write-wins* basado en `updated_at`.
-- **Justificación:** para el alcance del MVP (una tienda, pocos dispositivos), es simple de implementar y de explicar, y cubre el caso principal sin necesitar CRDTs o vector clocks.
-- **Idempotencia:** cada operación en `sync_queue` lleva un UUID generado en el cliente; el API lo usa para detectar reenvíos duplicados (por ejemplo, si la conexión se cae a medio POST) y no aplicar el cambio dos veces. Aplica igual a productos, tickets y líneas de detalle.
-- **Limitación conocida:** last-write-wins puede perder cambios legítimos si dos ediciones son casi simultáneas.
+- **Justificación:** para el alcance actual (una tienda, pocos dispositivos) es simple de implementar y de explicar, y cubre el caso principal sin necesitar CRDTs ni vector clocks.
+- **Idempotencia:** cada operación en `sync_queue` lleva un UUID generado en el cliente; el API lo usa para detectar reenvíos duplicados (por ejemplo, si la conexión se cae a medio POST) y no aplicar el cambio dos veces. Aplica a todas las tablas.
+- **Limitación conocida:** *last-write-wins* puede perder cambios legítimos si dos ediciones son casi simultáneas. Es una decisión consciente de alcance.
 
 ---
 
-## 12. Interfaz de Usuario
+## 13. Interfaz de Usuario
 
-Diseño pensado como software de punto de venta — no como dashboard genérico: legible, rápido de escanear, con jerarquía clara de números.
+Diseño pensado como software de punto de venta, no como dashboard genérico: legible, rápido de escanear, con jerarquía clara de números.
 
-- **Sistema de color:** fondo gris claro, superficies blancas con borde sutil, azul como color de acento (`#2653D4`), verde/ámbar/rojo reservados para estados de stock.
-- **Tipografía:** fuente nativa del sistema para la UI general; **tipografía monoespaciada** para precios, cantidades y SKUs (guiño al display de una caja registradora).
-- **Layout:** sidebar fija con navegación (Productos / Ventas), barra superior con estado de sincronización en tiempo real (indicador de color + botón manual).
-- **Productos:** tabla con badges de nivel de stock (ok / bajo / agotado), edición inline por fila.
-- **Ventas:** carrito de productos antes de confirmar, selector de método de pago, historial agrupado por ticket con detalle expandible por producto.
+- **Sistema de color:** fondo gris claro, superficies blancas con borde sutil, azul como acento (`#2653D4`), y verde/ámbar/rojo reservados para estados de stock y badges de rol.
+- **Tipografía:** fuente nativa del sistema para la UI general; monoespaciada para precios, cantidades, SKUs y PINs.
+- **Layout:** sidebar con navegación (Productos / Ventas / Usuarios según el rol), nombre y rol del usuario activo con botón de cerrar sesión, y barra superior con el estado de sincronización.
+- **Login:** pantalla completa con la lista de empleados y captura de PIN; configuración inicial del dueño cuando no hay usuarios.
+- **Productos:** tabla con badges de nivel de stock y controles que dependen del rol.
+- **Ventas:** carrito, selector de método de pago y historial agrupado por ticket con detalle expandible.
+- **Nota técnica:** los desplegables usan un componente propio en lugar del `<select>` nativo, porque WebView2 posiciona mal el popup nativo con escalado de pantalla mayor a 100%.
 
 ---
 
-## 13. Estado Actual y Próximos Pasos
+## 14. Limitaciones Conocidas
+
+| Limitación | Detalle |
+|-----------|---------|
+| Autorización solo en el cliente | El backend no verifica el rol del usuario: confía en cualquier cliente con el token de la API. Endurecerlo requeriría autenticación por usuario en la API. |
+| Token compartido | Un único `API_TOKEN` protege la API; no identifica a quien la usa. |
+| PIN débil por diseño | 4 dígitos con SHA-256 sin sal: separa accesos dentro de la tienda, pero no resiste un ataque con acceso a la base de datos. Además, el hash viaja y se almacena en la nube. |
+| Setup offline | Configurar la primera computadora sin conexión puede producir un segundo dueño si en la nube ya existía uno. Queda como decisión explícita en la pantalla. |
+| Conflictos | *Last-write-wins* puede descartar la edición más antigua de dos casi simultáneas. |
+
+---
+
+## 15. Estado Actual y Próximos Pasos
 
 **Completado:**
-1. Arquitectura, requisitos y diagramas definidos.
-2. Backend (Express + Prisma) con `/sync/push` y `/sync/pull`, probado end-to-end contra Supabase.
-3. Cliente MAUI Blazor Hybrid con SQLite local, `sync_queue`, y sincronización automática por conectividad.
-4. Flujo completo offline → online validado manualmente (agregar producto sin conexión, reconectar, confirmar en Supabase).
-5. Rediseño de UI completo.
-6. Modelo de ventas evolucionado de "una fila por producto" a "ticket + líneas de detalle", con método de pago.
-7. Deploy del backend en Railway con URL pública.
-8. Apuntar `AppConfig.cs` del cliente a la URL de producción.
+1. Arquitectura, requisitos y diagramas.
+2. Backend (Express + Prisma) con `/sync/push` y `/sync/pull`, desplegado en Railway sobre Supabase.
+3. Cliente MAUI Blazor Hybrid con SQLite local, `sync_queue` y sincronización automática por conectividad.
+4. Productos y ventas con tickets de varias líneas y método de pago.
+5. Usuarios con roles (v2): login por PIN, permisos en dos capas, alta de empleados, sincronización de usuarios y arranque seguro en equipos nuevos.
 
-**Pendiente:**
-1. Iteraciones futuras de mejora sobre esta base ya desplegada.
+**Candidatos para versiones futuras:**
+1. Reportes de ventas por periodo, método de pago y empleado.
