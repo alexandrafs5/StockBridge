@@ -1,6 +1,7 @@
 @page "/ventas"
 @inject LocalDatabase Db
 @inject SyncService SyncService
+@inject SessionService Session
 @implements IDisposable
 
 <div class="page-header">
@@ -22,6 +23,7 @@
                     <tr>
                         <th></th>
                         <th>Fecha</th>
+                        <th>Vendedor</th>
                         <th>Método</th>
                         <th class="text-right">Productos</th>
                         <th class="text-right">Total</th>
@@ -40,6 +42,7 @@
                                 </svg>
                             </td>
                             <td class="num">@ticket.Fecha.ToLocalTime().ToString("dd/MM HH:mm")</td>
+                            <td>@(ticket.VendedorNombre ?? "—")</td>
                             <td><span class="badge-metodo">@EtiquetaMetodo(ticket.MetodoPago)</span></td>
                             <td class="num text-right">@detalles.Sum(d => d.Cantidad)</td>
                             <td class="money text-right">@Formato.Moneda(ticket.Total)</td>
@@ -48,7 +51,7 @@
                         @if (expandido)
                         {
                             <tr class="ticket-detalle-row">
-                                <td colspan="5">
+                                <td colspan="6">
                                     <div class="ticket-detalle">
                                         @foreach (var d in detalles)
                                         {
@@ -318,7 +321,7 @@
 
         // Un solo ticket con todas las líneas del carrito — así el historial
         // muestra "una venta" con sus productos adentro, no una fila por producto.
-        await Db.RegistrarVentaAsync(_metodoPago, lineas);
+        await Db.RegistrarVentaAsync(_metodoPago, lineas, Session.UsuarioActual?.Id, Session.UsuarioActual?.Nombre);
 
         _mensaje = "Venta registrada — se sincronizará cuando haya conexión.";
         _esError = false;

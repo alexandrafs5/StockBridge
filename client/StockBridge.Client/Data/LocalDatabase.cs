@@ -71,7 +71,7 @@ public class LocalDatabase
     /// Ticket y líneas se encolan por separado para sync, pero se guardan
     /// juntos en la misma operación local.
     /// </summary>
-    public async Task<VentaTicket> RegistrarVentaAsync(string metodoPago, List<(Producto Producto, int Cantidad)> lineasCarrito)
+    public async Task<VentaTicket> RegistrarVentaAsync(string metodoPago, List<(Producto Producto, int Cantidad)> lineasCarrito, string? vendedorId, string? vendedorNombre)
     {
         var ahora = DateTime.UtcNow;
         var total = lineasCarrito.Sum(l => l.Producto.Precio * l.Cantidad);
@@ -80,6 +80,8 @@ public class LocalDatabase
         {
             MetodoPago = metodoPago,
             Total = total,
+            VendedorId = vendedorId,
+            VendedorNombre = vendedorNombre,
             Fecha = ahora,
             UpdatedAt = ahora,
             DeviceId = _deviceId
@@ -179,10 +181,10 @@ public class LocalDatabase
     // ---------- Usuarios ----------
 
     public async Task<bool> ExisteAlgunUsuarioAsync() =>
-        await _db.Table<Usuario>().CountAsync() > 0;
+        await _db.Table<Usuario>().Where(u => !u.Deleted).CountAsync() > 0;
 
     public Task<List<Usuario>> ObtenerUsuariosAsync() =>
-        _db.Table<Usuario>().OrderBy(u => u.Nombre).ToListAsync();
+        _db.Table<Usuario>().Where(u => !u.Deleted).OrderBy(u => u.Nombre).ToListAsync();
 
     public async Task<Usuario> CrearUsuarioAsync(string nombre, string pin, string rol)
     {
@@ -199,6 +201,37 @@ public class LocalDatabase
         await EncolarAsync("usuarios", "create", usuario.Id, usuario, usuario.UpdatedAt);
         return usuario;
     }
+
+    /// <summary>
+    /// Edita nombre y rol. Si "nuevoPin" viene vacío/null, el PIN actual no cambia.
+    /// </summary>
+    public async Task EditarUsuarioAsync(Usuario usuario, string nombre, string rol, string? nuevoPin)
+    {
+        usuario.Nombre = nombre.Trim();
+        usuario.Rol = rol;
+        if (!string.IsNullOrEmpty(nuevoPin))
+            usuario.PinHash = Seguridad.HashPin(nuevoPin);
+
+        usuario.UpdatedAt = DateTime.UtcNow;
+        usuario.DeviceId = _deviceId;
+
+        await _db.UpdateAsync(usuario);
+        await EncolarAsync("usuarios", "update", usuario.Id, usuario, usuario.UpdatedAt);
+    }
+
+    public async Task EliminarUsuarioAsync(Usuario usuario)
+    {
+        usuario.Deleted = true;
+        usuario.UpdatedAt = DateTime.UtcNow;
+        usuario.DeviceId = _deviceId;
+
+        await _db.UpdateAsync(usuario);
+        await EncolarAsync("usuarios", "delete", usuario.Id, usuario, usuario.UpdatedAt);
+    }
+
+    /// <summary>Cuántos dueños activos quedan — para no permitir dejar la tienda sin ninguno.</summary>
+    public Task<int> ContarDuenosActivosAsync() =>
+        _db.Table<Usuario>().Where(u => u.Rol == Roles.Dueno && !u.Deleted).CountAsync();
 
     /// <summary>Devuelve el usuario si el PIN coincide, o null si no.</summary>
     public async Task<Usuario?> VerificarLoginAsync(string usuarioId, string pin)

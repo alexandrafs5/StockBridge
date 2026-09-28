@@ -95,12 +95,10 @@ async function procesarOperacion(op) {
   }
 
   if (op.operacion === 'delete') {
-    if (op.tabla === 'productos') {
-      await prisma.producto.update({
-        where: { id: op.payload.id },
-        data: { deleted: true, updatedAt: op.updatedAt, deviceId: op.deviceId },
-      });
-    }
+    await modelo.update({
+      where: { id: op.payload.id },
+      data: { deleted: true, updatedAt: op.updatedAt, deviceId: op.deviceId },
+    });
   } else {
     await modelo.upsert({
       where: { id: op.payload.id },

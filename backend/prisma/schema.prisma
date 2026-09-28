@@ -26,12 +26,14 @@ model Producto {
 // Encabezado de una venta — lo que en la tienda sería "el ticket".
 // Agrupa una o varias líneas (DetalleVenta), cada una un producto distinto.
 model VentaTicket {
-  id         String   @id @default(uuid())
-  metodoPago String   @default("efectivo") @map("metodo_pago") // "efectivo" | "transferencia" | "tarjeta"
-  total      Decimal  @db.Decimal(10, 2)
-  fecha      DateTime @default(now())
-  updatedAt  DateTime @map("updated_at")
-  deviceId   String   @map("device_id")
+  id             String   @id @default(uuid())
+  metodoPago     String   @default("efectivo") @map("metodo_pago") // "efectivo" | "transferencia" | "tarjeta"
+  total          Decimal  @db.Decimal(10, 2)
+  vendedorId     String?  @map("vendedor_id")
+  vendedorNombre String?  @map("vendedor_nombre") // desnormalizado: se guarda tal cual aunque después cambie/se borre el usuario
+  fecha          DateTime @default(now())
+  updatedAt      DateTime @map("updated_at")
+  deviceId       String   @map("device_id")
 
   detalles DetalleVenta[]
 
@@ -62,6 +64,7 @@ model Usuario {
   nombre    String
   pinHash   String   @map("pin_hash")
   rol       String   // "cajero" | "gerente" | "dueno"
+  deleted   Boolean  @default(false)
   updatedAt DateTime @map("updated_at")
   deviceId  String   @map("device_id")
 

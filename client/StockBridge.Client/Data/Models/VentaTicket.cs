@@ -12,6 +12,10 @@ public class VentaTicket
 
     public decimal Total { get; set; }
 
+    public string? VendedorId { get; set; }
+
+    public string? VendedorNombre { get; set; }
+
     public DateTime Fecha { get; set; } = DateTime.UtcNow;
 
     public DateTime UpdatedAt { get; set; }

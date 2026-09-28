@@ -21,6 +21,8 @@ public class Usuario
 
     public string Rol { get; set; } = Roles.Cajero;
 
+    public bool Deleted { get; set; }
+
     public DateTime UpdatedAt { get; set; }
 
     public string DeviceId { get; set; } = string.Empty;

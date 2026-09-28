@@ -16,20 +16,74 @@ else
     <div class="workspace">
         <div class="panel">
             <div class="panel-header">Empleados (@_usuarios.Count)</div>
+
+            @if (!string.IsNullOrEmpty(_mensajeTabla))
+            {
+                <div class="panel-body" style="padding-bottom:0">
+                    <div class="form-message @(_esErrorTabla ? "error" : "")">@_mensajeTabla</div>
+                </div>
+            }
+
             <table>
                 <thead>
                     <tr>
                         <th>Nombre</th>
                         <th>Rol</th>
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody>
                     @foreach (var u in _usuarios)
                     {
-                        <tr>
-                            <td>@u.Nombre</td>
-                            <td><span class="role-badge role-@u.Rol">@EtiquetaRol(u.Rol)</span></td>
-                        </tr>
+                        @if (_editandoId == u.Id)
+                        {
+                            <tr class="row-editando">
+                                <td><input class="input-inline" style="width:140px" @bind="_editNombre" /></td>
+                                <td>
+                                    <div class="dropdown">
+                                        <button type="button" class="dropdown-trigger" @onclick="ToggleDropdownEditRol">
+                                            <span>@EtiquetaRol(_editRol)</span>
+                                            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                                                <path d="M2.5 4.5L6 8L9.5 4.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                                            </svg>
+                                        </button>
+                                        @if (_dropdownEditRolAbierto)
+                                        {
+                                            <div class="dropdown-menu">
+                                                @foreach (var r in _roles)
+                                                {
+                                                    <button type="button" class="dropdown-item" @onclick="() => SeleccionarEditRol(r)">@EtiquetaRol(r)</button>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                    <input class="mono input-inline" style="width:80px;margin-top:6px" type="password" maxlength="4" inputmode="numeric" placeholder="Nuevo PIN" @bind="_editPin" />
+                                </td>
+                                <td class="text-right">
+                                    <button class="btn-icon btn-icon-accent" @onclick="() => GuardarEdicion(u)">Guardar</button>
+                                    <button class="btn-icon" @onclick="CancelarEdicion">Cancelar</button>
+                                </td>
+                            </tr>
+                        }
+                        else
+                        {
+                            <tr>
+                                <td>@u.Nombre @(u.Id == Session.UsuarioActual?.Id ? "(tú)" : "")</td>
+                                <td><span class="role-badge role-@u.Rol">@EtiquetaRol(u.Rol)</span></td>
+                                <td class="text-right">
+                                    <button class="btn-icon btn-icon-accent" @onclick="() => IniciarEdicion(u)">Editar</button>
+                                    @if (_confirmandoEliminarId == u.Id)
+                                    {
+                                        <button class="btn-icon" @onclick="() => Eliminar(u)">¿Seguro? Sí, eliminar</button>
+                                        <button class="btn-icon" @onclick="() => _confirmandoEliminarId = null">Cancelar</button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn-icon" @onclick="() => _confirmandoEliminarId = u.Id">Eliminar</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
                     }
                 </tbody>
             </table>
@@ -86,12 +140,26 @@ else
     private static readonly string[] _roles = { Roles.Cajero, Roles.Gerente, Roles.Dueno };
 
     private List<Usuario> _usuarios = new();
+
+    // Alta
     private string _nombre = string.Empty;
     private string _pin = string.Empty;
     private string _rol = Roles.Cajero;
     private bool _dropdownRolAbierto;
     private string _mensaje = string.Empty;
     private bool _esError;
+
+    // Edición
+    private string? _editandoId;
+    private string _editNombre = string.Empty;
+    private string _editRol = Roles.Cajero;
+    private string _editPin = string.Empty;
+    private bool _dropdownEditRolAbierto;
+
+    // Eliminación
+    private string? _confirmandoEliminarId;
+    private string _mensajeTabla = string.Empty;
+    private bool _esErrorTabla;
 
     private static string EtiquetaRol(string rol) => rol switch
     {
@@ -147,6 +215,97 @@ else
         _pin = string.Empty;
         _rol = Roles.Cajero;
 
+        _usuarios = await Db.ObtenerUsuariosAsync();
+    }
+
+    private void ToggleDropdownEditRol() => _dropdownEditRolAbierto = !_dropdownEditRolAbierto;
+
+    private void SeleccionarEditRol(string rol)
+    {
+        _editRol = rol;
+        _dropdownEditRolAbierto = false;
+    }
+
+    private void IniciarEdicion(Usuario u)
+    {
+        _editandoId = u.Id;
+        _editNombre = u.Nombre;
+        _editRol = u.Rol;
+        _editPin = string.Empty;
+        _confirmandoEliminarId = null;
+        _mensajeTabla = string.Empty;
+    }
+
+    private void CancelarEdicion() => _editandoId = null;
+
+    private async Task GuardarEdicion(Usuario u)
+    {
+        if (!Session.PuedeGestionarUsuarios)
+        {
+            _mensajeTabla = "No tienes permiso para editar usuarios.";
+            _esErrorTabla = true;
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_editNombre))
+        {
+            _mensajeTabla = "Escribe un nombre.";
+            _esErrorTabla = true;
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(_editPin) && (_editPin.Length != 4 || !_editPin.All(char.IsDigit)))
+        {
+            _mensajeTabla = "El PIN debe ser de exactamente 4 dígitos (o déjalo vacío para no cambiarlo).";
+            _esErrorTabla = true;
+            return;
+        }
+
+        // No dejar la tienda sin ningún dueño.
+        if (u.Rol == Roles.Dueno && _editRol != Roles.Dueno && await Db.ContarDuenosActivosAsync() <= 1)
+        {
+            _mensajeTabla = "No puedes quitarle el rol de dueño al único dueño que queda.";
+            _esErrorTabla = true;
+            return;
+        }
+
+        await Db.EditarUsuarioAsync(u, _editNombre, _editRol, string.IsNullOrEmpty(_editPin) ? null : _editPin);
+
+        _editandoId = null;
+        _mensajeTabla = string.Empty;
+        _usuarios = await Db.ObtenerUsuariosAsync();
+    }
+
+    private async Task Eliminar(Usuario u)
+    {
+        if (!Session.PuedeGestionarUsuarios)
+        {
+            _mensajeTabla = "No tienes permiso para eliminar usuarios.";
+            _esErrorTabla = true;
+            _confirmandoEliminarId = null;
+            return;
+        }
+
+        if (u.Id == Session.UsuarioActual?.Id)
+        {
+            _mensajeTabla = "No puedes eliminar tu propia cuenta mientras tienes sesión iniciada.";
+            _esErrorTabla = true;
+            _confirmandoEliminarId = null;
+            return;
+        }
+
+        if (u.Rol == Roles.Dueno && await Db.ContarDuenosActivosAsync() <= 1)
+        {
+            _mensajeTabla = "No puedes eliminar al único dueño que queda.";
+            _esErrorTabla = true;
+            _confirmandoEliminarId = null;
+            return;
+        }
+
+        await Db.EliminarUsuarioAsync(u);
+
+        _confirmandoEliminarId = null;
+        _mensajeTabla = string.Empty;
         _usuarios = await Db.ObtenerUsuariosAsync();
     }
 }
