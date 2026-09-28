@@ -1,5 +1,5 @@
 # Sistema de Gestión de Inventario y Ventas Fuera de Línea
-### Documento de Especificación de Arquitectura — v2
+### Documento de Especificación de Arquitectura — v2 (cerrada)
 
 ---
 
@@ -28,16 +28,15 @@ El objetivo técnico del proyecto es demostrar:
 **Incluido (v2):**
 - Usuarios con tres roles: cajero, gerente y dueño.
 - Login por PIN en cada apertura de la app, con opción de cerrar sesión.
-- Alta de empleados por parte del dueño.
+- Alta, edición y eliminación de empleados por parte del dueño.
 - Usuarios sincronizados entre dispositivos.
+- Cada venta registra qué empleado la realizó.
+- Guardarraíles: no se puede eliminar la propia cuenta con sesión activa, ni dejar la tienda sin un dueño.
 
 **Fuera de alcance (por ahora):**
 - Multi-tienda / multi-sucursal.
 - Reportes avanzados o dashboards analíticos.
 - Autenticación de la API por usuario (se usa un token compartido).
-- Edición o cancelación de ventas ya registradas.
-- Edición o baja de usuarios.
-- Registro de qué empleado realizó cada venta.
 
 ---
 
@@ -62,6 +61,11 @@ El objetivo técnico del proyecto es demostrar:
 | RF-15 | En una instalación nueva sin usuarios, el primer usuario creado se convierte automáticamente en dueño. |
 | RF-16 | Los usuarios se sincronizan entre dispositivos: un empleado dado de alta en un equipo puede iniciar sesión en otro. |
 | RF-17 | En un equipo sin usuarios locales, el sistema intenta sincronizar antes de ofrecer la configuración inicial, para no crear un segundo dueño si ya existe uno en la nube. |
+| RF-18 | Cada venta registrada queda asociada al usuario que la hizo (nombre y ID). |
+| RF-19 | El dueño puede editar el nombre, el rol y (opcionalmente) el PIN de un empleado existente. |
+| RF-20 | El dueño puede eliminar (baja lógica) a un empleado. |
+| RF-21 | No se permite eliminar la cuenta con la que se tiene sesión iniciada. |
+| RF-22 | No se permite eliminar al último dueño activo, ni cambiarle el rol a otro que no sea dueño, si es el único que queda. |
 
 ## 4. Requisitos No Funcionales
 
@@ -75,6 +79,7 @@ El objetivo técnico del proyecto es demostrar:
 | RNF-06 | No se permiten valores negativos en precio ni en stock. |
 | RNF-07 | El PIN nunca se almacena ni se sincroniza en claro; solo su hash. |
 | RNF-08 | Los permisos por rol se validan en dos capas: la interfaz oculta lo no permitido y cada acción vuelve a validar el rol antes de ejecutarse. |
+| RNF-09 | Los tickets de venta creados antes de que existiera el campo "vendedor" siguen siendo válidos (campo opcional, no rompe datos históricos). |
 
 ---
 
@@ -117,7 +122,7 @@ flowchart LR
 
 ## 7. Modelo de Datos (ERD)
 
-Una venta se modela como un **ticket** (encabezado) con una o varias **líneas de detalle**, una por producto, igual que un recibo real. Los usuarios se guardan en su propia tabla.
+Una venta se modela como un **ticket** (encabezado) con una o varias **líneas de detalle**, una por producto, igual que un recibo real. El ticket también guarda quién la vendió. Los usuarios se guardan en su propia tabla, con borrado lógico igual que productos.
 
 ```mermaid
 erDiagram
@@ -138,6 +143,8 @@ erDiagram
         uuid id PK
         string metodo_pago
         decimal total
+        uuid vendedor_id "opcional"
+        string vendedor_nombre "opcional, desnormalizado"
         datetime fecha
         datetime updated_at
         string device_id
@@ -157,6 +164,7 @@ erDiagram
         string nombre
         string pin_hash
         string rol
+        boolean deleted
         datetime updated_at
         string device_id
     }
@@ -174,9 +182,10 @@ erDiagram
 **Notas de diseño:**
 - `device_id` en cada registro identifica qué dispositivo hizo el último cambio.
 - `updated_at` es el criterio de *last-write-wins*.
-- `deleted` en productos es un borrado lógico, para que el borrado también se pueda sincronizar.
+- `deleted` es borrado lógico en `productos` y en `usuarios`, para que el borrado también se pueda sincronizar.
 - `sync_queue.id` se genera como UUID en el cliente y viaja como identificador de idempotencia al backend, para todas las tablas.
-- `metodo_pago` vive en el ticket porque una venta tiene un solo método de pago.
+- `metodo_pago` vive en el ticket porque una venta tiene un solo método de pago; `vendedor_id`/`vendedor_nombre` igual, uno por ticket.
+- `vendedor_id`/`vendedor_nombre` son opcionales a propósito: los tickets creados antes de este campo no tienen esa información y siguen siendo válidos. El nombre se guarda desnormalizado (tal cual estaba al momento de la venta) para que el historial no cambie si luego se edita o elimina al empleado.
 - `usuarios.rol` toma los valores `cajero`, `gerente` o `dueno`.
 - `usuarios.pin_hash` es el hash SHA-256 del PIN, calculado en el cliente. El servidor lo almacena como cualquier otro campo y nunca ve el PIN.
 - Tablas sincronizadas: `productos`, `venta_tickets`, `detalle_ventas` y `usuarios`.
@@ -195,16 +204,24 @@ erDiagram
 | Crear productos nuevos | — | — | ✅ |
 | Editar precio de productos | — | — | ✅ |
 | Eliminar productos | — | — | ✅ |
-| Dar de alta empleados | — | — | ✅ |
+| Dar de alta, editar y eliminar empleados | — | — | ✅ |
 
 La jerarquía es cajero ⊂ gerente ⊂ dueño: cada rol conserva todo lo del anterior. Por eso se implementa como un único campo de rol y no como permisos sueltos.
 
 ### 8.2 Aplicación de los permisos (dos capas)
 
-1. **Interfaz:** `SessionService` concentra las reglas (`PuedeVender`, `PuedeAgregarStock`, `PuedeGestionarProductos`, `PuedeGestionarUsuarios`) y las páginas ocultan los controles que no corresponden al rol. Por ejemplo, un cajero ve el inventario en solo lectura y un gerente ve "+ Stock" pero no "Editar" ni "Eliminar".
-2. **Lógica:** cada acción sensible (agregar producto, editar, eliminar, crear usuario) vuelve a consultar `SessionService` antes de guardar. Si un gerente logra disparar una edición de precio, el precio se ignora y solo se aplica la suma de stock.
+1. **Interfaz:** `SessionService` concentra las reglas (`PuedeVender`, `PuedeAgregarStock`, `PuedeGestionarProductos`, `PuedeGestionarUsuarios`) y las páginas ocultan los controles que no corresponden al rol.
+2. **Lógica:** cada acción sensible (agregar producto, editar, eliminar, crear/editar/eliminar usuario) vuelve a consultar `SessionService` antes de guardar. Si un gerente logra disparar una edición de precio, el precio se ignora y solo se aplica la suma de stock.
 
-### 8.3 Flujo de acceso al abrir la app
+### 8.3 Administración de empleados (gestión de usuarios)
+
+El dueño puede dar de alta, editar y eliminar usuarios desde la app, con tres guardarraíles que protegen el acceso a la tienda:
+
+- **No autoeliminación:** no se puede borrar la cuenta con la que se tiene sesión iniciada. Evita quedarse fuera por accidente.
+- **Último dueño protegido:** no se puede eliminar al único dueño activo, ni cambiarle el rol a cajero o gerente, si no queda ningún otro dueño. Evita que la tienda se quede sin nadie con control total.
+- **Baja lógica:** eliminar un usuario marca `deleted = true` en vez de borrar el registro, igual que con productos, para que el borrado se sincronice correctamente entre dispositivos y no se pierda el historial de ventas asociado a ese empleado.
+
+### 8.4 Flujo de acceso al abrir la app
 
 ```mermaid
 flowchart TD
@@ -242,7 +259,7 @@ sequenceDiagram
     participant PG as Supabase
 
     U->>App: Confirma venta (carrito con 1+ productos)
-    App->>DB: INSERT venta_ticket + detalle_venta por línea + sync_queue por cada uno
+    App->>DB: INSERT venta_ticket (con vendedor) + detalle_venta por línea + sync_queue por cada uno
     App-->>U: Confirmación inmediata (local)
 
     Note over App,Net: Sin conexión: las operaciones esperan en la cola
@@ -332,6 +349,7 @@ flowchart TB
 - **Regla:** *Last-write-wins* basado en `updated_at`.
 - **Justificación:** para el alcance actual (una tienda, pocos dispositivos) es simple de implementar y de explicar, y cubre el caso principal sin necesitar CRDTs ni vector clocks.
 - **Idempotencia:** cada operación en `sync_queue` lleva un UUID generado en el cliente; el API lo usa para detectar reenvíos duplicados (por ejemplo, si la conexión se cae a medio POST) y no aplicar el cambio dos veces. Aplica a todas las tablas.
+- **Borrado lógico generalizado:** el backend aplica `deleted = true` para cualquier tabla que tenga ese campo (productos y usuarios), no solo para productos como en la v1.
 - **Limitación conocida:** *last-write-wins* puede perder cambios legítimos si dos ediciones son casi simultáneas. Es una decisión consciente de alcance.
 
 ---
@@ -345,7 +363,8 @@ Diseño pensado como software de punto de venta, no como dashboard genérico: le
 - **Layout:** sidebar con navegación (Productos / Ventas / Usuarios según el rol), nombre y rol del usuario activo con botón de cerrar sesión, y barra superior con el estado de sincronización.
 - **Login:** pantalla completa con la lista de empleados y captura de PIN; configuración inicial del dueño cuando no hay usuarios.
 - **Productos:** tabla con badges de nivel de stock y controles que dependen del rol.
-- **Ventas:** carrito, selector de método de pago y historial agrupado por ticket con detalle expandible.
+- **Ventas:** carrito, selector de método de pago, y historial agrupado por ticket con detalle expandible y el vendedor visible en la tabla.
+- **Usuarios:** tabla editable en línea (nombre, rol, PIN opcional) con eliminación de dos pasos (confirmación explícita).
 - **Nota técnica:** los desplegables usan un componente propio en lugar del `<select>` nativo, porque WebView2 posiciona mal el popup nativo con escalado de pantalla mayor a 100%.
 
 ---
@@ -356,20 +375,27 @@ Diseño pensado como software de punto de venta, no como dashboard genérico: le
 |-----------|---------|
 | Autorización solo en el cliente | El backend no verifica el rol del usuario: confía en cualquier cliente con el token de la API. Endurecerlo requeriría autenticación por usuario en la API. |
 | Token compartido | Un único `API_TOKEN` protege la API; no identifica a quien la usa. |
-| PIN débil por diseño | 4 dígitos con SHA-256 sin sal: separa accesos dentro de la tienda, pero no resiste un ataque con acceso a la base de datos. Además, el hash viaja y se almacena en la nube. |
+| PIN débil por diseño | 4 dígitos con SHA-256 sin sal: separa accesos dentro de la tienda, pero no resiste un ataque con acceso a la base de datos. |
+| Ventas inmutables | Una venta registrada no se puede editar ni cancelar. |
 | Setup offline | Configurar la primera computadora sin conexión puede producir un segundo dueño si en la nube ya existía uno. Queda como decisión explícita en la pantalla. |
 | Conflictos | *Last-write-wins* puede descartar la edición más antigua de dos casi simultáneas. |
+| Tickets históricos sin vendedor | Los tickets creados antes de este campo no tienen esa información; el historial los muestra con un guion. |
 
 ---
 
 ## 15. Estado Actual y Próximos Pasos
 
-**Completado:**
+**v1 — completada:**
 1. Arquitectura, requisitos y diagramas.
 2. Backend (Express + Prisma) con `/sync/push` y `/sync/pull`, desplegado en Railway sobre Supabase.
-3. Cliente MAUI Blazor Hybrid con SQLite local, `sync_queue` y sincronización automática por conectividad.
+3. Cliente MAUI Blazor Hybrid con SQLite local, `sync_queue` y sincronización automática.
 4. Productos y ventas con tickets de varias líneas y método de pago.
-5. Usuarios con roles (v2): login por PIN, permisos en dos capas, alta de empleados, sincronización de usuarios y arranque seguro en equipos nuevos.
 
-**Candidatos para versiones futuras:**
-1. Reportes de ventas por periodo, método de pago y empleado.
+**v2 — completada:**
+1. Usuarios con roles: login por PIN, permisos en dos capas, alta de empleados, sincronización de usuarios, arranque seguro en equipos nuevos.
+2. Trazabilidad de ventas: cada ticket registra quién la hizo.
+3. Administración completa de usuarios: edición y baja, con guardarraíles contra la autoeliminación y la pérdida del único dueño.
+
+**Candidatos para v3:**
+1. Verificación del rol en el backend con autenticación por usuario.
+2. Reportes de ventas por periodo, método de pago y empleado.
