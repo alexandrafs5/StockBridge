@@ -15,6 +15,9 @@ public class Usuario
     [PrimaryKey]
     public string Id { get; set; } = Guid.NewGuid().ToString();
 
+    // null = dueño (acceso global). Cajero/gerente siempre tienen una sucursal.
+    public string? SucursalId { get; set; }
+
     public string Nombre { get; set; } = string.Empty;
 
     public string PinHash { get; set; } = string.Empty;

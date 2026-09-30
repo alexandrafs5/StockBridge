@@ -12,7 +12,7 @@ const router = express.Router();
  *   "operaciones": [
  *     {
  *       "id": "uuid-de-la-operacion",   // generado en el cliente, usado para idempotencia
- *       "tabla": "productos" | "venta_tickets" | "detalle_ventas",
+ *       "tabla": "productos" | "venta_tickets" | "detalle_ventas" | "usuarios" | "sucursales",
  *       "operacion": "create" | "update" | "delete",
  *       "payload": { ... },              // datos del registro
  *       "updatedAt": "2026-09-26T10:05:00Z",
@@ -44,13 +44,23 @@ router.post('/push', async (req, res) => {
 });
 
 /**
- * GET /sync/pull?since=<ISO timestamp>&deviceId=<id>
+ * GET /sync/pull?since=<ISO timestamp>&deviceId=<id>&sucursalId=<id opcional>
+ *
  * Devuelve los cambios ocurridos después de "since", excluyendo los que
- * originó el mismo dispositivo que pregunta (para no hacerle echo de sus
- * propios cambios).
+ * originó el mismo dispositivo que pregunta.
+ *
+ * Si el dispositivo TODAVÍA no tiene una sucursal asignada (no manda
+ * sucursalId), es un equipo nuevo en configuración: solo recibe la lista
+ * de sucursales y los usuarios con rol "dueno" — lo mínimo para decidir
+ * a qué sucursal pertenece o crear una nueva. No recibe inventario ni
+ * ventas de sucursales que todavía no le corresponden.
+ *
+ * Una vez que el dispositivo ya tiene sucursalId, el pull queda filtrado
+ * a esa sucursal para productos/ventas, y a "empleados de esa sucursal +
+ * cualquier dueño" para usuarios.
  */
 router.get('/pull', async (req, res) => {
-  const { since, deviceId } = req.query;
+  const { since, deviceId, sucursalId } = req.query;
   const sinceDate = since ? new Date(since) : new Date(0);
 
   const whereBase = {
@@ -58,11 +68,34 @@ router.get('/pull', async (req, res) => {
     ...(deviceId ? { deviceId: { not: deviceId } } : {}),
   };
 
+  // Todos los dispositivos necesitan conocer la lista de sucursales
+  // (para el selector de "en qué sucursal está este equipo" y para
+  // poder agregar sucursales nuevas).
+  const sucursales = await prisma.sucursal.findMany({ where: whereBase });
+
+  if (!sucursalId) {
+    const duenos = await prisma.usuario.findMany({
+      where: { ...whereBase, rol: 'dueno' },
+    });
+
+    return res.json({
+      servidorTimestamp: new Date().toISOString(),
+      sucursales,
+      usuarios: duenos,
+      productos: [],
+      ventaTickets: [],
+      detalleVentas: [],
+    });
+  }
+
+  const whereSucursal = { ...whereBase, sucursalId };
+  const whereUsuarios = { ...whereBase, OR: [{ sucursalId }, { rol: 'dueno' }] };
+
   const [productos, ventaTickets, detalleVentas, usuarios] = await Promise.all([
-    prisma.producto.findMany({ where: whereBase }),
-    prisma.ventaTicket.findMany({ where: whereBase }),
-    prisma.detalleVenta.findMany({ where: whereBase }),
-    prisma.usuario.findMany({ where: whereBase }),
+    prisma.producto.findMany({ where: whereSucursal }),
+    prisma.ventaTicket.findMany({ where: whereSucursal }),
+    prisma.detalleVenta.findMany({ where: whereSucursal }),
+    prisma.usuario.findMany({ where: whereUsuarios }),
   ]);
 
   res.json({
@@ -71,6 +104,7 @@ router.get('/pull', async (req, res) => {
     ventaTickets,
     detalleVentas,
     usuarios,
+    sucursales,
   });
 });
 
@@ -127,6 +161,8 @@ function obtenerModelo(tabla) {
       return prisma.detalleVenta;
     case 'usuarios':
       return prisma.usuario;
+    case 'sucursales':
+      return prisma.sucursal;
     default:
       throw new Error(`Tabla desconocida: ${tabla}`);
   }

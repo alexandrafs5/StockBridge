@@ -8,6 +8,8 @@ public class DetalleVenta
     [PrimaryKey]
     public string Id { get; set; } = Guid.NewGuid().ToString();
 
+    public string SucursalId { get; set; } = string.Empty;
+
     public string VentaTicketId { get; set; } = string.Empty;
 
     public string ProductoId { get; set; } = string.Empty;

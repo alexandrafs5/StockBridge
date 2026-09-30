@@ -32,13 +32,19 @@ public class LocalDatabase
         _db.CreateTableAsync<VentaTicket>().Wait();
         _db.CreateTableAsync<DetalleVenta>().Wait();
         _db.CreateTableAsync<Usuario>().Wait();
+        _db.CreateTableAsync<Sucursal>().Wait();
         _db.CreateTableAsync<SyncQueueItem>().Wait();
     }
 
     // ---------- Productos ----------
+    // Cada dispositivo está fijo a una sucursal (DispositivoConfig.SucursalId):
+    // solo ve y crea productos de esa sucursal — el inventario es independiente
+    // entre sucursales.
 
     public Task<List<Producto>> ObtenerProductosAsync() =>
-        _db.Table<Producto>().Where(p => !p.Deleted).ToListAsync();
+        _db.Table<Producto>()
+           .Where(p => !p.Deleted && p.SucursalId == DispositivoConfig.SucursalId)
+           .ToListAsync();
 
     public async Task GuardarProductoAsync(Producto producto, bool esNuevo)
     {
@@ -46,9 +52,14 @@ public class LocalDatabase
         producto.DeviceId = _deviceId;
 
         if (esNuevo)
+        {
+            producto.SucursalId = DispositivoConfig.SucursalId ?? string.Empty;
             await _db.InsertAsync(producto);
+        }
         else
+        {
             await _db.UpdateAsync(producto);
+        }
 
         await EncolarAsync("productos", esNuevo ? "create" : "update", producto.Id, producto, producto.UpdatedAt);
     }

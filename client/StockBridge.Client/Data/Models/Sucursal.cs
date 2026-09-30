@@ -2,23 +2,15 @@ using SQLite;
 
 namespace StockBridge.Client.Data.Models;
 
-[Table("productos")]
-public class Producto
+[Table("sucursales")]
+public class Sucursal
 {
     [PrimaryKey]
     public string Id { get; set; } = Guid.NewGuid().ToString();
 
-    public string SucursalId { get; set; } = string.Empty;
-
-    public string Sku { get; set; } = string.Empty;
-
     public string Nombre { get; set; } = string.Empty;
 
-    public decimal Precio { get; set; }
-
-    public int Stock { get; set; }
-
-    public bool Deleted { get; set; }
+    public string? Direccion { get; set; }
 
     public DateTime UpdatedAt { get; set; }
 

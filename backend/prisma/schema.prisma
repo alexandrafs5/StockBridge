@@ -8,18 +8,34 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Producto {
+// Una sucursal de la tienda. El dispositivo (terminal) queda fijo a una
+// sucursal una vez configurado; cada sucursal tiene su propio inventario.
+model Sucursal {
   id        String   @id @default(uuid())
-  sku       String   @unique
   nombre    String
-  precio    Decimal  @db.Decimal(10, 2)
-  stock     Int      @default(0)
-  deleted   Boolean  @default(false)
+  direccion String?
   updatedAt DateTime @map("updated_at")
   deviceId  String   @map("device_id")
 
+  @@map("sucursales")
+}
+
+model Producto {
+  id         String   @id @default(uuid())
+  sucursalId String   @map("sucursal_id")
+  sku        String
+  nombre     String
+  precio     Decimal  @db.Decimal(10, 2)
+  stock      Int      @default(0)
+  deleted    Boolean  @default(false)
+  updatedAt  DateTime @map("updated_at")
+  deviceId   String   @map("device_id")
+
   detalles DetalleVenta[]
 
+  // El SKU es único DENTRO de cada sucursal, no globalmente — dos sucursales
+  // pueden vender el mismo producto con el mismo SKU de forma independiente.
+  @@unique([sucursalId, sku])
   @@map("productos")
 }
 
@@ -27,6 +43,7 @@ model Producto {
 // Agrupa una o varias líneas (DetalleVenta), cada una un producto distinto.
 model VentaTicket {
   id             String   @id @default(uuid())
+  sucursalId     String   @map("sucursal_id")
   metodoPago     String   @default("efectivo") @map("metodo_pago") // "efectivo" | "transferencia" | "tarjeta"
   total          Decimal  @db.Decimal(10, 2)
   vendedorId     String?  @map("vendedor_id")
@@ -41,8 +58,11 @@ model VentaTicket {
 }
 
 // Una línea dentro de un ticket: un producto + cantidad + su subtotal.
+// sucursalId va denormalizado (copia del ticket) para poder filtrar/sincronizar
+// esta tabla sin necesitar un join contra venta_tickets.
 model DetalleVenta {
   id             String   @id @default(uuid())
+  sucursalId     String   @map("sucursal_id")
   ventaTicketId  String   @map("venta_ticket_id")
   productoId     String   @map("producto_id")
   cantidad       Int
@@ -59,14 +79,16 @@ model DetalleVenta {
 
 // Empleado de la tienda con acceso a la app. El PIN se guarda ya hasheado
 // (el hash se calcula en el cliente — el servidor nunca ve el PIN en claro).
+// sucursalId es null para el dueño (acceso global); obligatorio para cajero/gerente.
 model Usuario {
-  id        String   @id @default(uuid())
-  nombre    String
-  pinHash   String   @map("pin_hash")
-  rol       String   // "cajero" | "gerente" | "dueno"
-  deleted   Boolean  @default(false)
-  updatedAt DateTime @map("updated_at")
-  deviceId  String   @map("device_id")
+  id         String   @id @default(uuid())
+  sucursalId String?  @map("sucursal_id")
+  nombre     String
+  pinHash    String   @map("pin_hash")
+  rol        String   // "cajero" | "gerente" | "dueno"
+  deleted    Boolean  @default(false)
+  updatedAt  DateTime @map("updated_at")
+  deviceId   String   @map("device_id")
 
   @@map("usuarios")
 }

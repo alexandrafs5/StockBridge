@@ -8,6 +8,8 @@ public class VentaTicket
     [PrimaryKey]
     public string Id { get; set; } = Guid.NewGuid().ToString();
 
+    public string SucursalId { get; set; } = string.Empty;
+
     public string MetodoPago { get; set; } = "efectivo"; // "efectivo" | "transferencia" | "tarjeta"
 
     public decimal Total { get; set; }
