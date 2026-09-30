@@ -122,7 +122,10 @@ async function procesarOperacion(op) {
   const modelo = obtenerModelo(op.tabla);
   const existente = await modelo.findUnique({ where: { id: op.payload.id } });
 
-  if (existente && new Date(existente.updatedAt) >= new Date(op.updatedAt)) {
+  // Convertimos a objeto Date nativo para evitar problemas de microsegundos e ISO con Prisma
+  const fechaOperacion = new Date(op.updatedAt);
+
+  if (existente && new Date(existente.updatedAt) >= fechaOperacion) {
     // El servidor ya tiene una versión igual o más reciente: se descarta esta operación.
     await registrarComoProcesada(op);
     return 'conflicto-descartado';
@@ -131,19 +134,22 @@ async function procesarOperacion(op) {
   if (op.operacion === 'delete') {
     await modelo.update({
       where: { id: op.payload.id },
-      data: { deleted: true, updatedAt: op.updatedAt, deviceId: op.deviceId },
+      // CORREGIDO: Pasamos fechaOperacion en lugar del string crudo
+      data: { deleted: true, updatedAt: fechaOperacion, deviceId: op.deviceId },
     });
   } else {
     await modelo.upsert({
       where: { id: op.payload.id },
-      create: { ...op.payload, updatedAt: op.updatedAt, deviceId: op.deviceId },
-      update: { ...op.payload, updatedAt: op.updatedAt, deviceId: op.deviceId },
+      // CORREGIDO: Sobrescribimos el campo con el objeto Date
+      create: { ...op.payload, updatedAt: fechaOperacion, deviceId: op.deviceId },
+      update: { ...op.payload, updatedAt: fechaOperacion, deviceId: op.deviceId },
     });
   }
 
   await registrarComoProcesada(op);
   return 'aplicada';
 }
+
 
 async function registrarComoProcesada(op) {
   await prisma.syncLog.create({
