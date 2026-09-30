@@ -1,3 +1,4 @@
+@using StockBridge.Client.Utils
 @inject LocalDatabase Db
 @inject SessionService Session
 @inject SyncService SyncService
@@ -9,24 +10,24 @@
 
         @if (_cargando)
         {
-            <p class="login-hint">Buscando usuarios de la tienda...</p>
+            <p class="login-hint">Buscando información de la tienda...</p>
         }
-        else if (!_hayUsuarios && _sinVerificar)
+        else if (_sinVerificar)
         {
             <h2>Sin conexión</h2>
             <p class="login-hint">
-                Todavía no hay usuarios en este equipo y no pudimos consultar el servidor
-                para ver si ya existen en la nube.
+                Este equipo todavía no está configurado y no pudimos consultar el servidor
+                para ver si tu tienda ya existe en la nube.
             </p>
             <button class="btn-primary" @onclick="Reintentar">Reintentar</button>
             <button class="btn-link" @onclick="ConfigurarSinConexion">
                 Es la primera computadora de la tienda: configurar sin conexión
             </button>
         }
-        else if (!_hayUsuarios)
+        else if (_esNegocioNuevo)
         {
             <h2>Configuración inicial</h2>
-            <p class="login-hint">Crea la cuenta del dueño. Desde ahí podrás dar de alta a los demás empleados.</p>
+            <p class="login-hint">Crea tu primera sucursal y la cuenta del dueño. Desde ahí podrás agregar más sucursales y empleados.</p>
 
             @if (!string.IsNullOrEmpty(_error))
             {
@@ -34,7 +35,11 @@
             }
 
             <div class="field">
-                <label for="setup-nombre">Nombre</label>
+                <label for="setup-sucursal">Nombre de la sucursal</label>
+                <input id="setup-sucursal" placeholder="Ej. Sucursal Centro" @bind="_nuevaSucursalNombre" />
+            </div>
+            <div class="field">
+                <label for="setup-nombre">Tu nombre (dueño)</label>
                 <input id="setup-nombre" @bind="_nombre" />
             </div>
             <div class="field">
@@ -45,7 +50,48 @@
                 <label for="setup-pin2">Confirmar PIN</label>
                 <input id="setup-pin2" class="mono" type="password" maxlength="4" inputmode="numeric" @bind="_pinConfirmar" />
             </div>
-            <button class="btn-primary" @onclick="CrearDuenoInicial">Crear cuenta de dueño</button>
+            <button class="btn-primary" @onclick="CrearNegocioInicial">Crear tienda y cuenta de dueño</button>
+        }
+        else if (_necesitaElegirSucursal)
+        {
+            <h2>¿En qué sucursal está este equipo?</h2>
+            <p class="login-hint">Esta computadora quedará fija a la sucursal que elijas.</p>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="form-message error">@_error</div>
+            }
+
+            <div class="login-users">
+                @foreach (var s in _sucursales)
+                {
+                    <button class="login-user" @onclick="() => ElegirSucursal(s)">
+                        <span>@s.Nombre</span>
+                    </button>
+                }
+            </div>
+
+            @if (!_agregandoSucursal)
+            {
+                <button class="btn-link" @onclick="() => _agregandoSucursal = true">+ Agregar sucursal nueva</button>
+            }
+            else
+            {
+                <div class="field" style="margin-top:14px">
+                    <label for="nueva-sucursal">Nombre de la sucursal nueva</label>
+                    <input id="nueva-sucursal" placeholder="Ej. Sucursal Norte" @bind="_nuevaSucursalNombre" />
+                </div>
+                <button class="btn-primary" @onclick="CrearYElegirSucursal">Crear y usar esta sucursal</button>
+                <button class="btn-link" @onclick="() => _agregandoSucursal = false">Cancelar</button>
+            }
+        }
+        else if (!_hayUsuarios && _sinVerificarUsuarios)
+        {
+            <h2>Sin conexión</h2>
+            <p class="login-hint">
+                Todavía no hay usuarios en este equipo y no pudimos consultar el servidor.
+            </p>
+            <button class="btn-primary" @onclick="Reintentar">Reintentar</button>
         }
         else if (_usuarioElegido == null)
         {
@@ -82,8 +128,18 @@
 
 @code {
     private bool _cargando = true;
+    private bool _sinVerificar; // no se pudo determinar si el negocio ya existe (sin conexión, primera vez)
+
+    // Etapa 1: sucursal del dispositivo (solo si DispositivoConfig.SucursalId es null)
+    private bool _esNegocioNuevo;
+    private bool _necesitaElegirSucursal;
+    private List<Sucursal> _sucursales = new();
+    private bool _agregandoSucursal;
+    private string _nuevaSucursalNombre = string.Empty;
+
+    // Etapa 2: login de usuario (igual que antes)
     private bool _hayUsuarios;
-    private bool _sinVerificar; // no hay usuarios locales y no se pudo consultar la nube
+    private bool _sinVerificarUsuarios;
     private List<Usuario> _usuarios = new();
     private Usuario? _usuarioElegido;
 
@@ -98,49 +154,80 @@
         await Cargar();
     }
 
-    /// <summary>
-    /// Si ya hay usuarios locales, se muestran de inmediato. Si no hay ninguno,
-    /// se sincroniza ANTES de decidir: puede que en la nube ya exista el dueño
-    /// (equipo nuevo en una tienda que ya usa StockBridge), y en ese caso no
-    /// hay que ofrecer crear otro.
-    /// </summary>
     private async Task Cargar()
     {
         _cargando = true;
-        _hayUsuarios = await Db.ExisteAlgunUsuarioAsync();
         _sinVerificar = false;
+        _error = string.Empty;
+
+        if (DispositivoConfig.SucursalId == null)
+        {
+            // Bootstrap: sin sucursal asignada, el pull solo trae sucursales + dueños.
+            var sincronizo = await SyncService.SincronizarAsync();
+            var sucursales = await Db.ObtenerSucursalesAsync();
+            var usuariosVisibles = await Db.ObtenerUsuariosAsync(); // ya incluye dueños sin importar sucursal
+            var hayDueno = usuariosVisibles.Any(u => u.Rol == Roles.Dueno);
+
+            if (sucursales.Count == 0 && !hayDueno)
+            {
+                if (!sincronizo)
+                {
+                    _sinVerificar = true;
+                    _cargando = false;
+                    return;
+                }
+                _esNegocioNuevo = true;
+            }
+            else
+            {
+                _necesitaElegirSucursal = true;
+                _sucursales = sucursales;
+            }
+
+            _cargando = false;
+            return;
+        }
+
+        // Ya tiene sucursal asignada: flujo normal de login.
+        _esNegocioNuevo = false;
+        _necesitaElegirSucursal = false;
+        _hayUsuarios = await Db.ExisteAlgunUsuarioAsync();
+        _sinVerificarUsuarios = false;
 
         if (!_hayUsuarios)
         {
             var sincronizo = await SyncService.SincronizarAsync();
             _hayUsuarios = await Db.ExisteAlgunUsuarioAsync();
-            _sinVerificar = !_hayUsuarios && !sincronizo;
+            _sinVerificarUsuarios = !_hayUsuarios && !sincronizo;
         }
 
         _usuarios = await Db.ObtenerUsuariosAsync();
         _cargando = false;
     }
 
-    // Si una sincronización termina mientras se ve el login (por ejemplo, volvió
-    // el internet), se refresca la lista de usuarios sin perder lo que se esté haciendo.
+    // Si una sincronización termina mientras se ve el login, se refresca sin perder lo que se esté haciendo.
     private void OnEstadoSync(object? sender, string estado)
     {
         if (estado != "Al día") return;
 
         InvokeAsync(async () =>
         {
-            if (_cargando || _usuarioElegido != null) return;
+            if (_cargando || _usuarioElegido != null || _necesitaElegirSucursal || _esNegocioNuevo) return;
 
             _hayUsuarios = await Db.ExisteAlgunUsuarioAsync();
             _usuarios = await Db.ObtenerUsuariosAsync();
-            if (_hayUsuarios) _sinVerificar = false;
+            if (_hayUsuarios) _sinVerificarUsuarios = false;
             StateHasChanged();
         });
     }
 
     private async Task Reintentar() => await Cargar();
 
-    private void ConfigurarSinConexion() => _sinVerificar = false;
+    private void ConfigurarSinConexion()
+    {
+        _sinVerificar = false;
+        _esNegocioNuevo = true;
+    }
 
     private static string EtiquetaRol(string rol) => rol switch
     {
@@ -152,11 +239,16 @@
     private static bool PinValido(string pin) =>
         pin.Length == 4 && pin.All(char.IsDigit);
 
-    private async Task CrearDuenoInicial()
+    private async Task CrearNegocioInicial()
     {
+        if (string.IsNullOrWhiteSpace(_nuevaSucursalNombre))
+        {
+            _error = "Escribe el nombre de la sucursal.";
+            return;
+        }
         if (string.IsNullOrWhiteSpace(_nombre))
         {
-            _error = "Escribe un nombre.";
+            _error = "Escribe tu nombre.";
             return;
         }
         if (!PinValido(_pin))
@@ -170,9 +262,33 @@
             return;
         }
 
-        var dueno = await Db.CrearUsuarioAsync(_nombre, _pin, Roles.Dueno);
+        var sucursal = await Db.CrearSucursalAsync(_nuevaSucursalNombre, null);
+        DispositivoConfig.SucursalId = sucursal.Id;
+
+        var dueno = await Db.CrearUsuarioAsync(_nombre, _pin, Roles.Dueno, null);
         _error = string.Empty;
         Session.IniciarSesion(dueno);
+    }
+
+    private async Task ElegirSucursal(Sucursal s)
+    {
+        DispositivoConfig.SucursalId = s.Id;
+        SyncService.ForzarResincronizacionCompleta();
+        await Cargar();
+    }
+
+    private async Task CrearYElegirSucursal()
+    {
+        if (string.IsNullOrWhiteSpace(_nuevaSucursalNombre))
+        {
+            _error = "Escribe el nombre de la sucursal.";
+            return;
+        }
+
+        var sucursal = await Db.CrearSucursalAsync(_nuevaSucursalNombre, null);
+        _nuevaSucursalNombre = string.Empty;
+        _agregandoSucursal = false;
+        await ElegirSucursal(sucursal);
     }
 
     private void Elegir(Usuario u)

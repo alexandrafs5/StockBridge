@@ -29,6 +29,7 @@ else
                     <tr>
                         <th>Nombre</th>
                         <th>Rol</th>
+                        <th>Sucursal</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -207,7 +208,7 @@ else
             return;
         }
 
-        await Db.CrearUsuarioAsync(_nombre, _pin, _rol);
+        await Db.CrearUsuarioAsync(_nombre, _pin, _rol, DispositivoConfig.SucursalId);
 
         _mensaje = $"Empleado \"{_nombre.Trim()}\" creado.";
         _esError = false;
@@ -269,7 +270,8 @@ else
             return;
         }
 
-        await Db.EditarUsuarioAsync(u, _editNombre, _editRol, string.IsNullOrEmpty(_editPin) ? null : _editPin);
+        await Db.EditarUsuarioAsync(u, _editNombre, _editRol, DispositivoConfig.SucursalId,
+            string.IsNullOrEmpty(_editPin) ? null : _editPin);
 
         _editandoId = null;
         _mensajeTabla = string.Empty;
